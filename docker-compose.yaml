@@ -1,6 +1,6 @@
 services:
   metad0:
-    image: docker.io/vesoft/nebula-metad:v3.8.0
+    image: docker.io/vesoft/nebula-metad:nightly
     environment:
       USER: root
       TZ:   "${TZ}"
@@ -47,7 +47,7 @@ services:
       - SYS_PTRACE
 
   metad1:
-    image: docker.io/vesoft/nebula-metad:v3.8.0
+    image: docker.io/vesoft/nebula-metad:nightly
     environment:
       USER: root
       TZ:   "${TZ}"
@@ -94,7 +94,7 @@ services:
       - SYS_PTRACE
 
   metad2:
-    image: docker.io/vesoft/nebula-metad:v3.8.0
+    image: docker.io/vesoft/nebula-metad:nightly
     environment:
       USER: root
       TZ:   "${TZ}"
@@ -141,7 +141,7 @@ services:
       - SYS_PTRACE
 
   storaged0:
-    image: docker.io/vesoft/nebula-storaged:v3.8.0
+    image: docker.io/vesoft/nebula-storaged:nightly
     environment:
       USER: root
       TZ:   "${TZ}"
@@ -208,7 +208,7 @@ services:
       - SYS_PTRACE
 
   storaged1:
-    image: docker.io/vesoft/nebula-storaged:v3.8.0
+    image: docker.io/vesoft/nebula-storaged:nightly
     environment:
       USER: root
       TZ:   "${TZ}"
@@ -275,7 +275,7 @@ services:
       - SYS_PTRACE
 
   storaged2:
-    image: docker.io/vesoft/nebula-storaged:v3.8.0
+    image: docker.io/vesoft/nebula-storaged:nightly
     environment:
       USER: root
       TZ:   "${TZ}"
@@ -342,7 +342,7 @@ services:
       - SYS_PTRACE
 
   graphd:
-    image: docker.io/vesoft/nebula-graphd:v3.8.0
+    image: docker.io/vesoft/nebula-graphd:nightly
     environment:
       USER: root
       TZ:   "${TZ}"
@@ -414,7 +414,7 @@ services:
       - SYS_PTRACE
 
   graphd1:
-    image: docker.io/vesoft/nebula-graphd:v3.8.0
+    image: docker.io/vesoft/nebula-graphd:nightly
     environment:
       USER: root
       TZ:   "${TZ}"
@@ -486,7 +486,7 @@ services:
       - SYS_PTRACE
 
   graphd2:
-    image: docker.io/vesoft/nebula-graphd:v3.8.0
+    image: docker.io/vesoft/nebula-graphd:nightly
     environment:
       USER: root
       TZ:   "${TZ}"
@@ -558,7 +558,7 @@ services:
       - SYS_PTRACE
   
   console:
-    image: docker.io/vesoft/nebula-console:v3.6.0
+    image: docker.io/vesoft/nebula-console:nightly
     entrypoint: ""
     command: 
       - sh
