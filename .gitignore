@@ -2,3 +2,5 @@
 
 data/
 logs/
+spark/data/
+spark/apps/nebula-spark-connector_3.0-3.8.1.jar
