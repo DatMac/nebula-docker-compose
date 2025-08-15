@@ -139,7 +139,7 @@ services:
       - --disable_page_cache=false
       - --enable_rocksdb_prefix_filtering=true
       - --enable_rocksdb_whole_key_filtering=true
-      - --rocksdb_filtering_prefix_length=12
+      # - --rocksdb_filtering_prefix_length=12
       - --enable_partitioned_index_filter=false
       - --query_concurrently=true
       - --num_io_threads=16
@@ -193,7 +193,7 @@ services:
       - --disable_page_cache=false
       - --enable_rocksdb_prefix_filtering=true
       - --enable_rocksdb_whole_key_filtering=true
-      - --rocksdb_filtering_prefix_length=12
+      # - --rocksdb_filtering_prefix_length=12
       - --enable_partitioned_index_filter=false
       - --query_concurrently=true
       - --num_io_threads=16
@@ -247,7 +247,7 @@ services:
       - --disable_page_cache=false
       - --enable_rocksdb_prefix_filtering=true
       - --enable_rocksdb_whole_key_filtering=true
-      - --rocksdb_filtering_prefix_length=12
+      # - --rocksdb_filtering_prefix_length=12
       - --enable_partitioned_index_filter=false
       - --query_concurrently=true
       - --num_io_threads=16
