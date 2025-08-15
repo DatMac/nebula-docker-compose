@@ -480,6 +480,7 @@ services:
       - ALLOW_ANONYMOUS_LOGIN=yes
       - SPARK_SUBMIT_OPTS=-Divy.home=/opt/bitnami/spark/.ivy2
       - SPARK_DAEMON_JAVA_OPTS=-Dhadoop.security.authentication=simple
+      - HADOOP_USER_NAME=sparky
     ports:
       - "8080:8080"
       - "7077:7077"
@@ -501,6 +502,7 @@ services:
       - ALLOW_ANONYMOUS_LOGIN=yes
       - SPARK_SUBMIT_OPTS=-Divy.home=/opt/bitnami/spark/.ivy2
       - SPARK_DAEMON_JAVA_OPTS=-Dhadoop.security.authentication=simple
+      - HADOOP_USER_NAME=sparky
     depends_on:
       - spark-master
     volumes:
