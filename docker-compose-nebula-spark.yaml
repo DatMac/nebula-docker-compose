@@ -480,6 +480,7 @@ services:
     volumes:
       - ./spark/apps:/opt/bitnami/spark/apps
       - ./spark/data:/opt/bitnami/spark/data
+      - ./spark/config/spark-defaults.conf:/opt/bitnami/spark/conf/spark-defaults.conf
     networks:
       - nebula-net
 
@@ -493,6 +494,7 @@ services:
     volumes:
       - ./spark/apps:/opt/bitnami/spark/apps
       - ./spark/data:/opt/bitnami/spark/data
+      - ./spark/config/spark-defaults.conf:/opt/bitnami/spark/conf/spark-defaults.conf
     networks:
       - nebula-net
 
