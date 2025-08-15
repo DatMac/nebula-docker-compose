@@ -474,6 +474,12 @@ services:
     image: bitnami/spark:3.5
     environment:
       - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - ALLOW_ANONYMOUS_LOGIN=yes
+      - SPARK_SUBMIT_OPTS=-Divy.home=/opt/bitnami/spark/.ivy2
+      - SPARK_DAEMON_JAVA_OPTS=-Dhadoop.security.authentication=simple
     ports:
       - "8080:8080"
       - "7077:7077"
@@ -489,6 +495,12 @@ services:
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - ALLOW_ANONYMOUS_LOGIN=yes
+      - SPARK_SUBMIT_OPTS=-Divy.home=/opt/bitnami/spark/.ivy2
+      - SPARK_DAEMON_JAVA_OPTS=-Dhadoop.security.authentication=simple
     depends_on:
       - spark-master
     volumes:
