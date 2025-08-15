@@ -20,6 +20,12 @@ services:
       - --default_replica_factor=1
       - --heartbeat_interval_secs=10
       - --agent_heartbeat_interval_secs=60
+
+      - --enable_ssl=true
+      - --enable_storage_ssl = true
+      - --cert_path=/usr/local/nebula/certs/server.crt
+      - --key_path=/usr/local/nebula/certs/server.key
+      - --ca_path=/usr/local/nebula/certs/ca.crt
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://metad0:19559/status"]
       interval: 30s
@@ -33,6 +39,7 @@ services:
     volumes:
       - ./data/meta0:/data/meta
       - ./logs/meta0:/logs
+      - ./certs:/usr/local/nebula/certs
     networks:
       - nebula-net
     restart: on-failure
@@ -60,6 +67,12 @@ services:
       - --default_replica_factor=1
       - --heartbeat_interval_secs=10
       - --agent_heartbeat_interval_secs=60
+
+      - --enable_ssl=true
+      - --enable_storage_ssl = true
+      - --cert_path=/usr/local/nebula/certs/server.crt
+      - --key_path=/usr/local/nebula/certs/server.key
+      - --ca_path=/usr/local/nebula/certs/ca.crt
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://metad1:19559/status"]
       interval: 30s
@@ -73,6 +86,7 @@ services:
     volumes:
       - ./data/meta1:/data/meta
       - ./logs/meta1:/logs
+      - ./certs:/usr/local/nebula/certs
     networks:
       - nebula-net
     restart: on-failure
@@ -100,6 +114,12 @@ services:
       - --default_replica_factor=1
       - --heartbeat_interval_secs=10
       - --agent_heartbeat_interval_secs=60
+
+      - --enable_ssl=true
+      - --enable_storage_ssl = true
+      - --cert_path=/usr/local/nebula/certs/server.crt
+      - --key_path=/usr/local/nebula/certs/server.key
+      - --ca_path=/usr/local/nebula/certs/ca.crt
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://metad2:19559/status"]
       interval: 30s
@@ -113,6 +133,7 @@ services:
     volumes:
       - ./data/meta2:/data/meta
       - ./logs/meta2:/logs
+      - ./certs:/usr/local/nebula/certs
     networks:
       - nebula-net
     restart: on-failure
@@ -156,6 +177,12 @@ services:
       - --max_concurrent_subtasks=10
 
       - --memory_tracker_limit_ratio=0.8
+
+      - --enable_ssl=true
+      - --enable_storage_ssl = true
+      - --cert_path=/usr/local/nebula/certs/server.crt
+      - --key_path=/usr/local/nebula/certs/server.key
+      - --ca_path=/usr/local/nebula/certs/ca.crt
     depends_on:
       - metad0
       - metad1
@@ -173,6 +200,7 @@ services:
     volumes:
       - ./data/storage0:/data/storage
       - ./logs/storage0:/logs
+      - ./certs:/usr/local/nebula/certs
     networks:
       - nebula-net
     restart: on-failure
@@ -216,6 +244,12 @@ services:
       - --max_concurrent_subtasks=10
 
       - --memory_tracker_limit_ratio=0.8
+
+      - --enable_ssl=true
+      - --enable_storage_ssl = true
+      - --cert_path=/usr/local/nebula/certs/server.crt
+      - --key_path=/usr/local/nebula/certs/server.key
+      - --ca_path=/usr/local/nebula/certs/ca.crt
     depends_on:
       - metad0
       - metad1
@@ -233,6 +267,7 @@ services:
     volumes:
       - ./data/storage1:/data/storage
       - ./logs/storage1:/logs
+      - ./certs:/usr/local/nebula/certs
     networks:
       - nebula-net
     restart: on-failure
@@ -276,6 +311,12 @@ services:
       - --max_concurrent_subtasks=10
 
       - --memory_tracker_limit_ratio=0.8
+
+      - --enable_ssl=true
+      - --enable_storage_ssl = true
+      - --cert_path=/usr/local/nebula/certs/server.crt
+      - --key_path=/usr/local/nebula/certs/server.key
+      - --ca_path=/usr/local/nebula/certs/ca.crt
     depends_on:
       - metad0
       - metad1
@@ -293,6 +334,7 @@ services:
     volumes:
       - ./data/storage2:/data/storage
       - ./logs/storage2:/logs
+      - ./certs:/usr/local/nebula/certs
     networks:
       - nebula-net
     restart: on-failure
@@ -342,6 +384,12 @@ services:
       - --min_batch_size=8192
       - --optimize_appendvertices=false
       - --path_batch_size=10000
+
+      - --enable_ssl=true
+      - --enable_storage_ssl = true
+      - --cert_path=/usr/local/nebula/certs/server.crt
+      - --key_path=/usr/local/nebula/certs/server.key
+      - --ca_path=/usr/local/nebula/certs/ca.crt
     depends_on:
       - storaged0
       - storaged1
@@ -358,6 +406,7 @@ services:
       - 19670
     volumes:
       - ./logs/graph:/logs
+      - ./certs:/usr/local/nebula/certs
     networks:
       - nebula-net
     restart: on-failure
@@ -407,6 +456,12 @@ services:
       - --min_batch_size=8192
       - --optimize_appendvertices=false
       - --path_batch_size=10000
+
+      - --enable_ssl=true
+      - --enable_storage_ssl = true
+      - --cert_path=/usr/local/nebula/certs/server.crt
+      - --key_path=/usr/local/nebula/certs/server.key
+      - --ca_path=/usr/local/nebula/certs/ca.crt
     depends_on:
       - storaged0
       - storaged1
@@ -423,6 +478,7 @@ services:
       - 19670
     volumes:
       - ./logs/graph1:/logs
+      - ./certs:/usr/local/nebula/certs
     networks:
       - nebula-net
     restart: on-failure
@@ -472,6 +528,12 @@ services:
       - --min_batch_size=8192
       - --optimize_appendvertices=false
       - --path_batch_size=10000
+
+      - --enable_ssl=true
+      - --enable_storage_ssl = true
+      - --cert_path=/usr/local/nebula/certs/server.crt
+      - --key_path=/usr/local/nebula/certs/server.key
+      - --ca_path=/usr/local/nebula/certs/ca.crt
     depends_on:
       - storaged0
       - storaged1
@@ -488,6 +550,7 @@ services:
       - 19670
     volumes:
       - ./logs/graph2:/logs
+      - ./certs:/usr/local/nebula/certs
     networks:
       - nebula-net
     restart: on-failure
