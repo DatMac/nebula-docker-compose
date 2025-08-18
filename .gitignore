@@ -3,4 +3,4 @@
 data/
 logs/
 spark/data/
-spark/apps/
+spark/apps/*.jar
