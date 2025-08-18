@@ -24,7 +24,7 @@ def main():
 
     # Configuration for writing data
     nebula_write_config = {
-        "metaAddress": "metad0:9559,metad1:9559,metad2:9559",
+        # "metaAddress": "metad0:9559,metad1:9559,metad2:9559",
         "graphAddress": "graphd:9669,graphd1:9669,graphd2:9669",
         "spaceName": "spark_test",
         "user": "root",
@@ -84,8 +84,8 @@ def main():
     new_players_data = [("player103", "Michael Jordan", 59), ("player104", "LeBron James", 38)]
     schema = StructType([
         StructField("player_id", StringType(), True),
-        StructField("player_name", StringType(), True),
-        StructField("player_age", IntegerType(), True)
+        StructField("name", StringType(), True),
+        StructField("age", IntegerType(), True)
     ])
     
     df_new_players = spark.createDataFrame(data=new_players_data, schema=schema)
@@ -95,13 +95,16 @@ def main():
 
     df_new_players.write.format("com.vesoft.nebula.connector.NebulaDataSource") \
          .option("type", "vertex") \
+         .option("operatorType", "write") \
          .option("label", "player") \
          .option("vidPolicy", "") \
-         .option("vidField", "player_id") \
-         .option("propertyNames", "name,age") \
-         .option("propertyValues", "player_name,player_age") \
+         .option("vertexField", "player_id") \
+         .option("batch", 1) \
          .option("writeMode", "insert") \
-         .options(**nebula_write_config) \
+         .option("metaAddress", "metad0:9559,metad1:9559,metad2:9559") \
+         .option("graphAddress", "graphd:9669,graphd1:9669,graphd2:9669") \
+         .option("spaceName", "spark_test") \
+         .option("password", "nebula") \
          .save()
 
     print("Successfully wrote new vertices. Check NebulaGraph to verify.")
@@ -125,11 +128,18 @@ def main():
     
     df_new_follows.write.format("com.vesoft.nebula.connector.NebulaDataSource") \
         .option("type", "edge") \
+        .option("operateType", "write") \
+        .option("srcPolicy", "") \
+        .option("dstPolicy", "") \
+        .option("metaAddress", "metad0:9559,metad1:9559,metad2:9559") \
+        .option("graphAddress", "graphd:9669,graphd1:9669,graphd2:9669") \
+        .option("user", "root") \
+        .option("password", "nebula") \
+        .option("spaceName", "spark_test") \
         .option("label", "follow") \
-        .option("srcVidField", "source_id") \
-        .option("dstVidField", "dest_id") \
-        .option("propertyNames", "degree") \
-        .option("propertyValues", "follow_degree") \
+        .option("srcVertexField", "source_id") \
+        .option("dstVertexField", "dest_id") \
+        .option("rankField", "follow_degree") \
         .option("writeMode", "insert") \
         .options(**nebula_write_config) \
         .save()
