@@ -4,7 +4,6 @@ from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType
 
 def main():
-    # 1. Initialize Spark Session
     # The Spark master URL points to the service name in docker-compose
     spark = SparkSession.builder \
         .appName("NebulaSparkConnectorTest") \
@@ -12,24 +11,6 @@ def main():
         .getOrCreate()
 
     print("Spark Session created successfully.")
-
-    # 2. Define NebulaGraph Connection Config
-    # The metaAddress points to the metad service in docker-compose
-    # nebula_read_config = {
-    #     "metaAddress": "metad0:9559",
-    #     "spaceName": "spark_test",
-    #     "user": "root",
-    #     "password": "nebula",
-    # }
-
-    # Configuration for writing data
-    nebula_write_config = {
-        # "metaAddress": "metad0:9559,metad1:9559,metad2:9559",
-        "graphAddress": "graphd:9669,graphd1:9669,graphd2:9669",
-        "spaceName": "spark_test",
-        "user": "root",
-        "password": "nebula",
-    }
 
     # ===============================================================
     # TEST 1: Read Vertices from NebulaGraph
@@ -81,9 +62,9 @@ def main():
     # ===============================================================
     print("\n--- [Test 3] Writing new 'player' vertices to NebulaGraph ---")
 
-    new_players_data = [("player103", "Michael Jordan", 59), ("player104", "LeBron James", 38)]
+    new_players_data = [(103, "Michael Jordan", 59), (104, "LeBron James", 38)]
     schema = StructType([
-        StructField("player_id", StringType(), True),
+        StructField("player_id", IntegerType(), True),
         StructField("name", StringType(), True),
         StructField("age", IntegerType(), True)
     ])
@@ -95,7 +76,7 @@ def main():
 
     df_new_players.write.format("com.vesoft.nebula.connector.NebulaDataSource") \
          .option("type", "vertex") \
-         .option("operatorType", "write") \
+         .option("operateType", "write") \
          .option("label", "player") \
          .option("vidPolicy", "") \
          .option("vertexField", "player_id") \
@@ -115,11 +96,11 @@ def main():
     # ===============================================================
     print("\n--- [Test 4] Writing new 'follow' edges to NebulaGraph ---")
 
-    new_follow_data = [("player103", "player104", 99.9)]
+    new_follow_data = [(103, 104, 99.9)]
     schema = StructType([
-        StructField("source_id", StringType(), True),
-        StructField("dest_id", StringType(), True),
-        StructField("follow_degree", DoubleType(), True)
+        StructField("source_id", IntegerType(), True),
+        StructField("dest_id", IntegerType(), True),
+        StructField("degree", DoubleType(), True)
     ])
 
     df_new_follows = spark.createDataFrame(data=new_follow_data, schema=schema)
@@ -140,8 +121,9 @@ def main():
         .option("label", "follow") \
         .option("srcVertexField", "source_id") \
         .option("dstVertexField", "dest_id") \
-        .option("rankField", "follow_degree") \
+        .option("rankField", "") \
         .option("writeMode", "insert") \
+        .option("batch", 1) \
         .save()
         
     print("Successfully wrote new edges. Check NebulaGraph to verify.")
