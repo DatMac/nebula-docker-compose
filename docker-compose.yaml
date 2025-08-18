@@ -14,7 +14,6 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-
       - --timezone_name=UTC+08:00
       - --default_parts_num=10
       - --default_replica_factor=1
@@ -54,7 +53,6 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-
       - --timezone_name=UTC+08:00
       - --default_parts_num=10
       - --default_replica_factor=1
@@ -94,7 +92,6 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-
       - --timezone_name=UTC+08:00
       - --default_parts_num=10
       - --default_replica_factor=1
@@ -134,27 +131,21 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-
       - --timezone_name=UTC+08:00
       - --heartbeat_interval_secs=10
-
       - --raft_heartbeat_interval_secs=30
       - --raft_rpc_timeout_ms=500
       - --wal_ttl=14400
-
       - --disable_page_cache=false
-
       - --enable_rocksdb_prefix_filtering=true
       - --enable_rocksdb_whole_key_filtering=true
-      - --rocksdb_filtering_prefix_length=12
+      # - --rocksdb_filtering_prefix_length=12
       - --enable_partitioned_index_filter=false
-
       - --query_concurrently=true
       - --num_io_threads=16
       - --num_max_connections=0
       - --num_worker_threads=32
       - --max_concurrent_subtasks=10
-
       - --memory_tracker_limit_ratio=0.8
     depends_on:
       - metad0
@@ -194,27 +185,21 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-
       - --timezone_name=UTC+08:00
       - --heartbeat_interval_secs=10
-
       - --raft_heartbeat_interval_secs=30
       - --raft_rpc_timeout_ms=500
       - --wal_ttl=14400
-
       - --disable_page_cache=false
-
       - --enable_rocksdb_prefix_filtering=true
       - --enable_rocksdb_whole_key_filtering=true
-      - --rocksdb_filtering_prefix_length=12
+      # - --rocksdb_filtering_prefix_length=12
       - --enable_partitioned_index_filter=false
-
       - --query_concurrently=true
       - --num_io_threads=16
       - --num_max_connections=0
       - --num_worker_threads=32
       - --max_concurrent_subtasks=10
-
       - --memory_tracker_limit_ratio=0.8
     depends_on:
       - metad0
@@ -254,27 +239,21 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-
       - --timezone_name=UTC+08:00
       - --heartbeat_interval_secs=10
-
       - --raft_heartbeat_interval_secs=30
       - --raft_rpc_timeout_ms=500
       - --wal_ttl=14400
-
       - --disable_page_cache=false
-
       - --enable_rocksdb_prefix_filtering=true
       - --enable_rocksdb_whole_key_filtering=true
-      - --rocksdb_filtering_prefix_length=12
+      # - --rocksdb_filtering_prefix_length=12
       - --enable_partitioned_index_filter=false
-
       - --query_concurrently=true
       - --num_io_threads=16
       - --num_max_connections=0
       - --num_worker_threads=32
       - --max_concurrent_subtasks=10
-
       - --memory_tracker_limit_ratio=0.8
     depends_on:
       - metad0
@@ -313,31 +292,23 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-
       - --timezone_name=UTC+08:00
       - --default_collate=utf8_bin
       - --accept_partial_success=false
       - --session_reclaim_interval_secs=60
-
       - --num_accept_threads=1
       - --num_netio_threads=0
       - --num_max_connections=0
       - --num_worker_threads=0
       - --heartbeat_interval_secs=10
       - --slow_query_threshold_us=200000
-
       - --enable_authorize=true
       - --auth_type=password
-
       - --system_memory_high_watermark_ratio=0.8
-
       - --enable_space_level_metrics=true
-
       - --enable_experimental_feature=true
       - --enable_data_balance=true
-
       - --memory_tracker_limit_ratio=0.8
-
       - --max_job_size=1
       - --min_batch_size=8192
       - --optimize_appendvertices=false
@@ -378,31 +349,23 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-
       - --timezone_name=UTC+08:00
       - --default_collate=utf8_bin
       - --accept_partial_success=false
       - --session_reclaim_interval_secs=60
-
       - --num_accept_threads=1
       - --num_netio_threads=0
       - --num_max_connections=0
       - --num_worker_threads=0
       - --heartbeat_interval_secs=10
       - --slow_query_threshold_us=200000
-
       - --enable_authorize=true
       - --auth_type=password
-
       - --system_memory_high_watermark_ratio=0.8
-
       - --enable_space_level_metrics=true
-
       - --enable_experimental_feature=true
       - --enable_data_balance=true
-
       - --memory_tracker_limit_ratio=0.8
-
       - --max_job_size=1
       - --min_batch_size=8192
       - --optimize_appendvertices=false
@@ -443,31 +406,23 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-
       - --timezone_name=UTC+08:00
       - --default_collate=utf8_bin
       - --accept_partial_success=false
       - --session_reclaim_interval_secs=60
-
       - --num_accept_threads=1
       - --num_netio_threads=0
       - --num_max_connections=0
       - --num_worker_threads=0
       - --heartbeat_interval_secs=10
       - --slow_query_threshold_us=200000
-
       - --enable_authorize=true
       - --auth_type=password
-
       - --system_memory_high_watermark_ratio=0.8
-
       - --enable_space_level_metrics=true
-
       - --enable_experimental_feature=true
       - --enable_data_balance=true
-
       - --memory_tracker_limit_ratio=0.8
-
       - --max_job_size=1
       - --min_batch_size=8192
       - --optimize_appendvertices=false
@@ -512,6 +467,36 @@ services:
 
     depends_on:
       - graphd
+    networks:
+      - nebula-net
+
+  spark-master:
+    image: my-spark-app-image
+    user: "1001:1001"
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - ./spark/apps:/opt/bitnami/spark/apps
+      - ./spark/data:/opt/bitnami/spark/data
+      - ./spark/config/spark-defaults.conf:/opt/bitnami/spark/conf/spark-defaults.conf
+    networks:
+      - nebula-net
+
+  spark-worker:
+    image: my-spark-app-image
+    user: "1001:1001"
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+    depends_on:
+      - spark-master
+    volumes:
+      - ./spark/apps:/opt/bitnami/spark/apps
+      - ./spark/data:/opt/bitnami/spark/data
+      - ./spark/config/spark-defaults.conf:/opt/bitnami/spark/conf/spark-defaults.conf
     networks:
       - nebula-net
 
