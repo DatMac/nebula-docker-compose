@@ -25,7 +25,7 @@ def main():
                             .option("metaAddress", "metad0:9559") \
                             .option("spaceName", "spark_test") \
                             .option("user", "root") \
-                            .option("password", "nebula") \
+                            .option("passwd", "nebula") \
                             .option("partitionNumber", 1) \
                             .load()
     
@@ -47,7 +47,7 @@ def main():
          .option("metaAddress", "metad0:9559") \
          .option("spaceName", "spark_test") \
          .option("user", "root") \
-         .option("password", "nebula") \
+         .option("passwd", "nebula") \
          .option("partitionNumber", 1) \
          .load()
 
@@ -86,7 +86,7 @@ def main():
          .option("graphAddress", "graphd:9669,graphd1:9669,graphd2:9669") \
          .option("spaceName", "spark_test") \
          .option("user", "root") \
-         .option("password", "nebula") \
+         .option("passwd", "nebula") \
          .save()
 
     print("Successfully wrote new vertices. Check NebulaGraph to verify.")
@@ -116,7 +116,7 @@ def main():
         .option("metaAddress", "metad0:9559,metad1:9559,metad2:9559") \
         .option("graphAddress", "graphd:9669,graphd1:9669,graphd2:9669") \
         .option("user", "root") \
-        .option("password", "nebula") \
+        .option("passwd", "nebula") \
         .option("spaceName", "spark_test") \
         .option("label", "follow") \
         .option("srcVertexField", "source_id") \
