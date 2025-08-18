@@ -104,6 +104,7 @@ def main():
          .option("metaAddress", "metad0:9559,metad1:9559,metad2:9559") \
          .option("graphAddress", "graphd:9669,graphd1:9669,graphd2:9669") \
          .option("spaceName", "spark_test") \
+         .option("user", "root") \
          .option("password", "nebula") \
          .save()
 
@@ -141,7 +142,6 @@ def main():
         .option("dstVertexField", "dest_id") \
         .option("rankField", "follow_degree") \
         .option("writeMode", "insert") \
-        .options(**nebula_write_config) \
         .save()
         
     print("Successfully wrote new edges. Check NebulaGraph to verify.")
