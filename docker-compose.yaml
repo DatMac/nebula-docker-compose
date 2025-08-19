@@ -473,9 +473,37 @@ services:
           sleep 1;
           echo "retry to add hosts.";
         done && tail -f /dev/null;
-
     depends_on:
       - graphd
+    networks:
+      - nebula-net
+
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop2.7.4-java8
+    container_name: namenode
+    hostname: namenode
+    restart: always
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+    volumes:
+      - ./data/hdfs/namenode:/hadoop/dfs/name
+    environment:
+      - CLUSTER_NAME=test
+    networks:
+      - nebula-net
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop2.7.4-java8
+    container_name: datanode
+    hostname: datanode
+    restart: always
+    volumes:
+      - ./data/hdfs/datanode:/hadoop/dfs/data
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+    depends_on:
+      - namenode
     networks:
       - nebula-net
 
@@ -484,6 +512,7 @@ services:
     user: "1001:1001"
     environment:
       - SPARK_MODE=master
+      - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:9000
     ports:
       - "8080:8080"
       - "7077:7077"
@@ -491,6 +520,9 @@ services:
       - ./spark/apps:/opt/bitnami/spark/apps
       - ./spark/data:/opt/bitnami/spark/data
       - ./spark/config/spark-defaults.conf:/opt/bitnami/spark/conf/spark-defaults.conf
+    depends_on:
+      - namenode
+      - datanode
     networks:
       - nebula-net
 
@@ -500,6 +532,7 @@ services:
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:9000
     depends_on:
       - spark-master
     volumes:
@@ -510,4 +543,4 @@ services:
       - nebula-net
 
 networks:
-  nebula-net:
+  nebula-net: 
