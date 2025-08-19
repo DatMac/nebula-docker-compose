@@ -26,7 +26,7 @@ def create_person_data(num_people):
     data = []
     for _ in range(num_people):
         data.append((
-            f"person_{uuid.uuid4()}",
+            f"{uuid.uuid4()}",
             fake.name(),
             fake.date_of_birth(minimum_age=18, maximum_age=80),
             fake.country()
@@ -38,7 +38,7 @@ def create_movie_data(num_movies):
     data = []
     for _ in range(num_movies):
         data.append((
-            f"movie_{uuid.uuid4()}",
+            f"{uuid.uuid4()}",
             ' '.join(fake.words(nb=random.randint(2, 5))).title(),
             random.randint(1980, 2024),
             random.randint(80, 180),
@@ -57,7 +57,7 @@ def create_user_data(num_users):
     data = []
     for _ in range(num_users):
         data.append((
-            f"user_{uuid.uuid4()}",
+            f"{uuid.uuid4()}",
             fake.user_name(),
             fake.date_between(start_date='-5y', end_date='today'),
             fake.country()
