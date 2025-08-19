@@ -311,13 +311,13 @@ services:
       - --enable_space_level_metrics=true
       - --enable_experimental_feature=true
       - --enable_data_balance=true
-      - --memory_tracker_limit_ratio=2
+      - --memory_tracker_limit_ratio=0.8
       - --max_job_size=1
       - --min_batch_size=8192
       - --optimize_appendvertices=false
       - --path_batch_size=10000
-      - --session_idle_timeout_secs=60
-      - --client_idle_timeout_secs=60
+      - --session_idle_timeout_secs=300
+      - --client_idle_timeout_secs=300
     depends_on:
       - storaged0
       - storaged1
@@ -370,13 +370,13 @@ services:
       - --enable_space_level_metrics=true
       - --enable_experimental_feature=true
       - --enable_data_balance=true
-      - --memory_tracker_limit_ratio=2
+      - --memory_tracker_limit_ratio=0.8
       - --max_job_size=1
       - --min_batch_size=8192
       - --optimize_appendvertices=false
       - --path_batch_size=10000
-      - --session_idle_timeout_secs=60
-      - --client_idle_timeout_secs=60
+      - --session_idle_timeout_secs=300
+      - --client_idle_timeout_secs=300
     depends_on:
       - storaged0
       - storaged1
@@ -429,13 +429,13 @@ services:
       - --enable_space_level_metrics=true
       - --enable_experimental_feature=true
       - --enable_data_balance=true
-      - --memory_tracker_limit_ratio=2
+      - --memory_tracker_limit_ratio=0.8
       - --max_job_size=1
       - --min_batch_size=8192
       - --optimize_appendvertices=false
       - --path_batch_size=10000
-      - --session_idle_timeout_secs=60
-      - --client_idle_timeout_secs=60
+      - --session_idle_timeout_secs=300
+      - --client_idle_timeout_secs=300
     depends_on:
       - storaged0
       - storaged1
@@ -540,7 +540,7 @@ services:
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:9000
+      - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
     depends_on:
       - spark-master
     volumes:
