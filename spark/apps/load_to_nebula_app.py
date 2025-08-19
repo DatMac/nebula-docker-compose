@@ -4,7 +4,7 @@ import re
 from pyspark.sql import SparkSession, DataFrame
 
 # --- Configuration ---
-HDFS_BASE_PATH = "hdfs://namenode:8020/nebula_data"
+HDFS_BASE_PATH = "hdfs://namenode:8020/tmp"
 NEBULA_META_ADDRESS = "metad0:9559,metad1:9559,metad2:9559"
 NEBULA_GRAPH_ADDRESS = "graphd:9669,graphd1:9669,graphd2:9669"
 NEBULA_SPACE = "movie_kg"

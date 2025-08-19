@@ -128,30 +128,30 @@ if __name__ == "__main__":
     # 4. Create DataFrames
     print("Creating Spark DataFrames...")
     # Vertex DataFrames
-    person_df = spark.createDataFrame(people_data, ["personID:ID(person)", "name:string", "birthdate:date", "nationality:string"])
-    movie_df = spark.createDataFrame(movie_data, ["movieID:ID(movie)", "title:string", "release_year:int", "runtime_in_min:int", "imdb_rating:double", "plot_summary:string"])
-    genre_df = spark.createDataFrame(genre_data, ["genreID:ID(genre)", "name:string"])
-    user_df = spark.createDataFrame(user_data, ["userID:ID(user)", "username:string", "join_date:date", "country:string"])
+    person_df = spark.createDataFrame(people_data, ["personID", "name", "birthdate", "nationality"])
+    movie_df = spark.createDataFrame(movie_data, ["movieID", "title", "release_year", "runtime_in_min", "imdb_rating", "plot_summary"])
+    genre_df = spark.createDataFrame(genre_data, ["genreID", "name"])
+    user_df = spark.createDataFrame(user_data, ["userID", "username", "join_date", "country"])
 
     # Edge DataFrames
-    acted_in_df = spark.createDataFrame(acted_in_data, ["src:START_ID(person)", "dst:END_ID(movie)", "role:string"])
-    directed_df = spark.createDataFrame(directed_data, ["src:START_ID(person)", "dst:END_ID(movie)"])
-    belongs_to_df = spark.createDataFrame(belongs_to_data, ["src:START_ID(movie)", "dst:END_ID(genre)"])
-    rated_df = spark.createDataFrame(rated_data, ["src:START_ID(user)", "dst:END_ID(movie)", "rating:int", "timestamp:long"])
+    acted_in_df = spark.createDataFrame(acted_in_data, ["src", "dst", "role"])
+    directed_df = spark.createDataFrame(directed_data, ["src", "dst"])
+    belongs_to_df = spark.createDataFrame(belongs_to_data, ["src", "dst"])
+    rated_df = spark.createDataFrame(rated_data, ["src", "dst", "rating", "timestamp"])
 
     # 5. Write DataFrames to HDFS as CSV
     print(f"Writing data to HDFS at {HDFS_BASE_PATH}...")
     # Write Vertices
-    person_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/vertices/person")
-    movie_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/vertices/movie")
-    genre_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/vertices/genre")
-    user_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/vertices/user")
+    person_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/vertices/person")
+    movie_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/vertices/movie")
+    genre_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/vertices/genre")
+    user_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/vertices/user")
 
     # Write Edges
-    acted_in_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/edges/acted_in")
-    directed_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/edges/directed")
-    belongs_to_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/edges/belongs_to")
-    rated_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/edges/rated")
+    acted_in_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/edges/acted_in")
+    directed_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/edges/directed")
+    belongs_to_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/edges/belongs_to")
+    rated_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/edges/rated")
 
     print("Data generation complete and saved to HDFS.")
 
