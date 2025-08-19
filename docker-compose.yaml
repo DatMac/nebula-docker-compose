@@ -484,14 +484,20 @@ services:
     hostname: namenode
     restart: always
     ports:
-      - "9870:9870"
+      - "9870:50070"
       - "9000:9000"
+      - "8020:8020"
     volumes:
       - ./data/hdfs/namenode:/hadoop/dfs/name
     environment:
       - CLUSTER_NAME=test
     networks:
       - nebula-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://namenode:50070"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   datanode:
     image: bde2020/hadoop-datanode:2.0.0-hadoop2.7.4-java8
@@ -501,9 +507,11 @@ services:
     volumes:
       - ./data/hdfs/datanode:/hadoop/dfs/data
     environment:
-      SERVICE_PRECONDITION: "namenode:9870"
+      SERVICE_PRECONDITION: "namenode:50070"
+      CORE_CONF_fs_defaultFS: "hdfs://namenode:8020"
     depends_on:
-      - namenode
+      namenode:
+        condition: service_healthy
     networks:
       - nebula-net
 
@@ -512,7 +520,7 @@ services:
     user: "1001:1001"
     environment:
       - SPARK_MODE=master
-      - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:9000
+      - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
     ports:
       - "8080:8080"
       - "7077:7077"
