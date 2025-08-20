@@ -142,16 +142,16 @@ if __name__ == "__main__":
     # 5. Write DataFrames to HDFS as CSV
     print(f"Writing data to HDFS at {HDFS_BASE_PATH}...")
     # Write Vertices
-    person_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/vertices/person")
-    movie_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/vertices/movie")
-    genre_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/vertices/genre")
-    user_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/vertices/user")
+    person_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/vertices/person")
+    movie_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/vertices/movie")
+    genre_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/vertices/genre")
+    user_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/vertices/user")
 
     # Write Edges
-    acted_in_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/edges/acted_in")
-    directed_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/edges/directed")
-    belongs_to_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/edges/belongs_to")
-    rated_df.write.mode("overwrite").option("header", "true").parquet(f"{HDFS_BASE_PATH}/edges/rated")
+    acted_in_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/edges/acted_in")
+    directed_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/edges/directed")
+    belongs_to_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/edges/belongs_to")
+    rated_df.write.mode("overwrite").option("header", "true").csv(f"{HDFS_BASE_PATH}/edges/rated")
 
     print("Data generation complete and saved to HDFS.")
 
