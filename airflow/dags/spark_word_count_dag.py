@@ -22,7 +22,7 @@ with DAG(
     
     # Define the output path using an Airflow Jinja template.
     # This ensures each run has a unique output folder.
-    hdfs_output_path = "hdfs://namenode:8020/tmp/word_count_{{ run_id }}"
+    hdfs_output_path = "hdfs://namenode:8020/tmp/word_count_{{ ts_nodash }}"
 
     # Task to submit the Spark job
     submit_spark_job = SparkSubmitOperator(
