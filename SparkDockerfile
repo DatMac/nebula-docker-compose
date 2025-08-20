@@ -9,6 +9,11 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends python3.7 python3-pip && \
     rm -rf /var/lib/apt/lists/*
 
+RUN python3.6 -m pip install \
+    dataclasses \
+    "Faker==14.2.1" \
+    "typing-extensions==4.1.1"
+
 RUN groupadd --system --gid 1001 sparky && \
     useradd --system --uid 1001 --gid sparky --shell /bin/bash --create-home sparky && \
     chown -R sparky:sparky /opt/bitnami/spark

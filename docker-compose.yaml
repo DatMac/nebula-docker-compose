@@ -11,6 +11,8 @@ x-airflow-common:
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW_CONN_SPARK_DEFAULT: "spark://spark-master:7077" 
+    PYSPARK_DRIVER_PYTHON: "/usr/bin/python3.7"
+    PYSPARK_PYTHON: "/usr/bin/python3.7"
   volumes:
     - ./airflow/dags:/opt/airflow/dags:rw
     - ./airflow/logs:/opt/airflow/logs:rw
@@ -545,6 +547,7 @@ services:
     environment:
       - SPARK_MODE=master
       - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
+      - PYSPARK_PYTHON=/usr/bin/python3.7
     ports:
       - "8080:8080"
       - "7077:7077"
@@ -565,6 +568,7 @@ services:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
       - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
+      - PYSPARK_PYTHON=/usr/bin/python3.7
     depends_on:
       - spark-master
     volumes:
