@@ -1,16 +1,22 @@
-FROM apache/airflow:2.8.1
+FROM apache/airflow:2.6.0-python3.7
 
 # --- Environment Variables ---
+# Set up all environment variables first for clarity and use in later commands.
 ENV JAVA_HOME="/opt/java/openjdk-8"
 ENV HADOOP_HOME="/opt/hadoop-2.7.4"
 ENV HADOOP_CONF_DIR="${HADOOP_HOME}/etc/hadoop"
-ENV PATH="${JAVA_HOME}/bin:${HADOOP_HOME}/bin:${HADOOP_HOME}/sbin:${PATH}"
+ENV SPARK_HOME="/opt/spark-2.4.4" 
+# Add all necessary bin directories to the PATH
+ENV PATH="${JAVA_HOME}/bin:${HADOOP_HOME}/bin:${HADOOP_HOME}/sbin:${SPARK_HOME}/bin:${PATH}"
 
 # --- Arguments for Download URLs ---
 ARG JDK_VERSION="8u422-b05"
 ARG JDK_URL="https://github.com/adoptium/temurin8-binaries/releases/download/jdk${JDK_VERSION}/OpenJDK8U-jdk_x64_linux_hotspot_8u422b05.tar.gz"
 ARG HADOOP_VERSION="2.7.4"
 ARG HADOOP_URL="https://archive.apache.org/dist/hadoop/common/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz"
+ARG SPARK_VERSION="2.4.4"
+ARG SPARK_HADOOP_VERSION="2.7" 
+ARG SPARK_URL="https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop${SPARK_HADOOP_VERSION}.tgz"
 
 # Switch to root to perform all installations
 USER root
@@ -33,13 +39,19 @@ RUN set -eux; \
     tar -xzf /tmp/hadoop.tar.gz -C "${HADOOP_HOME}" --strip-components=1; \
     rm /tmp/hadoop.tar.gz; \
     \
-    # 4. Configure Hadoop to find Java
+    # 4. Install Spark 2.4.4 Client 
+    mkdir -p "${SPARK_HOME}"; \
+    curl --fail --location --output /tmp/spark.tgz "${SPARK_URL}"; \
+    tar -xzf /tmp/spark.tgz -C "${SPARK_HOME}" --strip-components=1; \
+    rm /tmp/spark.tgz; \
+    \
+    # 5. Configure Hadoop to find Java
     echo "export JAVA_HOME=${JAVA_HOME}" >> "${HADOOP_CONF_DIR}/hadoop-env.sh"; \
     \
-    # 5. Clean up apt cache
+    # 6. Clean up apt cache
     rm -rf /var/lib/apt/lists/*
 
-# --- NEW STEP: Copy Hadoop Cluster Configuration ---
+# --- Hadoop Cluster Configuration ---
 COPY ./hadoop_conf/ ${HADOOP_CONF_DIR}/
 
 # Switch back to the non-privileged airflow user
