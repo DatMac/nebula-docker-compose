@@ -1,0 +1,28 @@
+FROM apache/airflow:2.8.1
+
+ENV JAVA_HOME="/opt/java/openjdk-8"
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+ARG JDK_VERSION="8u422-b05"
+ARG JDK_URL="https://github.com/adoptium/temurin8-binaries/releases/download/jdk${JDK_VERSION}/OpenJDK8U-jdk_x64_linux_hotspot_8u422b05.tar.gz"
+
+USER root
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends curl ca-certificates; \
+    \
+    mkdir -p "${JAVA_HOME}"; \
+    # Use --fail to get a clear error on HTTP failure (like 404)
+    curl --fail --location --output /tmp/openjdk.tar.gz "${JDK_URL}"; \
+    \
+    # Extract the archive, stripping the top-level directory
+    tar -xzf /tmp/openjdk.tar.gz -C "${JAVA_HOME}" --strip-components=1; \
+    \
+    # Clean up the downloaded file and apt cache to keep the image small
+    rm /tmp/openjdk.tar.gz; \
+    rm -rf /var/lib/apt/lists/*
+
+USER airflow
+
+RUN pip install --no-cache-dir apache-airflow-providers-apache-spark==2.1.3
