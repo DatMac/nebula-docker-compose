@@ -1,0 +1,49 @@
+FROM apache/airflow:2.8.1
+
+# --- Environment Variables ---
+ENV JAVA_HOME="/opt/java/openjdk-8"
+ENV HADOOP_HOME="/opt/hadoop-2.7.4"
+ENV HADOOP_CONF_DIR="${HADOOP_HOME}/etc/hadoop"
+ENV PATH="${JAVA_HOME}/bin:${HADOOP_HOME}/bin:${HADOOP_HOME}/sbin:${PATH}"
+
+# --- Arguments for Download URLs ---
+ARG JDK_VERSION="8u422-b05"
+ARG JDK_URL="https://github.com/adoptium/temurin8-binaries/releases/download/jdk${JDK_VERSION}/OpenJDK8U-jdk_x64_linux_hotspot_8u422b05.tar.gz"
+ARG HADOOP_VERSION="2.7.4"
+ARG HADOOP_URL="https://archive.apache.org/dist/hadoop/common/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz"
+
+# Switch to root to perform all installations
+USER root
+
+# --- Installation Block ---
+RUN set -eux; \
+    # 1. Install dependencies
+    apt-get update; \
+    apt-get install -y --no-install-recommends curl ca-certificates; \
+    \
+    # 2. Install Java 8
+    mkdir -p "${JAVA_HOME}"; \
+    curl --fail --location --output /tmp/openjdk.tar.gz "${JDK_URL}"; \
+    tar -xzf /tmp/openjdk.tar.gz -C "${JAVA_HOME}" --strip-components=1; \
+    rm /tmp/openjdk.tar.gz; \
+    \
+    # 3. Install Hadoop 2.7.4 Client
+    mkdir -p "${HADOOP_HOME}"; \
+    curl --fail --location --output /tmp/hadoop.tar.gz "${HADOOP_URL}"; \
+    tar -xzf /tmp/hadoop.tar.gz -C "${HADOOP_HOME}" --strip-components=1; \
+    rm /tmp/hadoop.tar.gz; \
+    \
+    # 4. Configure Hadoop to find Java
+    echo "export JAVA_HOME=${JAVA_HOME}" >> "${HADOOP_CONF_DIR}/hadoop-env.sh"; \
+    \
+    # 5. Clean up apt cache
+    rm -rf /var/lib/apt/lists/*
+
+# --- NEW STEP: Copy Hadoop Cluster Configuration ---
+COPY ./hadoop_conf/ ${HADOOP_CONF_DIR}/
+
+# Switch back to the non-privileged airflow user
+USER airflow
+
+# --- Python Dependencies ---
+RUN pip install --no-cache-dir apache-airflow-providers-apache-spark==2.1.3
