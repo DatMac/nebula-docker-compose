@@ -1,0 +1,194 @@
+client:
+  version: v3
+  address: "graphd:9669,graphd1:9669,graphd2:9669"
+  user: root
+  password: nebula
+  concurrencyPerAddress: 10
+  reconnectInitialInterval: 1s
+  retry: 3
+  retryInitialInterval: 1s
+
+manager:
+  spaceName: movie_kg
+  batch: 128
+  readerConcurrency: 50
+  importerConcurrency: 512
+  statsInterval: 10s
+
+log:
+  level: INFO
+  console: true
+  files:
+    - logs/nebula-importer.log
+
+sources:
+  - hdfs:
+      address: "namenode:8020"
+      user: "hdfs"
+      path: "/tmp/vertices/person/*.csv"
+    batch: 256
+    csv:
+      delimiter: ","
+      withHeader: true
+    tags:
+      - name: person
+        id:
+          type: "STRING"
+          index: 0
+        props:
+          - name: "name"
+            type: "STRING"
+            index: 1
+          - name: "birthdate"
+            type: "DATE"
+            index: 2
+          - name: "nationality"
+            type: "STRING"
+            index: 3
+
+  - hdfs:
+      address: "namenode:8020"
+      user: "hdfs"
+      path: "/tmp/vertices/movie/*.csv"
+    batch: 256
+    csv:
+      delimiter: ","
+      withHeader: true
+    tags:
+      - name: movie
+        id:
+          type: "STRING"
+          index: 0
+        props:
+          - name: "title"
+            type: "STRING"
+            index: 1
+          - name: "release_year"
+            type: "INT"
+            index: 2
+          - name: "runtime_in_min"
+            type: "INT"
+            index: 3
+          - name: "imdb_rating"
+            type: "DOUBLE"
+            index: 4
+          - name: "plot_summary"
+            type: "STRING"
+            index: 5
+
+  - hdfs:
+      address: "namenode:8020"
+      user: "hdfs"
+      path: "/tmp/vertices/genre/*.csv"
+    batch: 256
+    csv:
+      delimiter: ","
+      withHeader: true
+    tags:
+      - name: genre
+        id:
+          type: "STRING"
+          index: 0
+        props:
+          - name: "name"
+            type: "STRING"
+            index: 1
+
+  - hdfs:
+      address: "namenode:8020"
+      user: "hdfs"
+      path: "/tmp/vertices/user/*.csv"
+    batch: 256
+    csv:
+      delimiter: ","
+      withHeader: true
+    tags:
+      - name: user
+        id:
+          type: "STRING"
+          index: 0
+        props:
+          - name: "username"
+            type: "STRING"
+            index: 1
+          - name: "join_date"
+            type: "DATE"
+            index: 2
+          - name: "country"
+            type: "STRING"
+            index: 3
+
+  - hdfs:
+      address: "namenode:8020"
+      user: "hdfs"
+      path: "/tmp/edges/acted_in/*.csv"
+    batch: 256
+    edges:
+      - name: acted_in
+        src:
+          id:
+            type: "STRING"
+            index: 0
+        dst:
+          id:
+            type: "STRING"
+            index: 1
+        props:
+          - name: "role"
+            type: "STRING"
+            index: 2
+
+  - hdfs:
+      address: "namenode:8020"
+      user: "hdfs"
+      path: "/tmp/edges/directed/*.csv"
+    batch: 256
+    edges:
+      - name: directed
+        src:
+          id:
+            type: "STRING"
+            index: 0
+        dst:
+          id:
+            type: "STRING"
+            index: 1
+
+  - hdfs:
+      address: "namenode:8020"
+      user: "hdfs"
+      path: "/tmp/edges/belongs_to/*.csv"
+    batch: 256
+    edges:
+      - name: belongs_to
+        src:
+          id:
+            type: "STRING"
+            index: 0
+        dst:
+          id:
+            type: "STRING"
+            index: 1
+
+  - hdfs:
+      address: "namenode:8020"
+      user: "hdfs"
+      path: "/tmp/edges/rated/*.csv"
+    batch: 256
+    edges:
+      - name: rated
+        src:
+          id:
+            type: "STRING"
+            index: 0
+        dst:
+          id:
+            type: "STRING"
+            index: 1
+        props:
+          - name: "rating"
+            type: "INT"
+            index: 2
+          - name: "timestamp"
+            type: "INT"
+            index: 3

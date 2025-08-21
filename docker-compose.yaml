@@ -2,7 +2,8 @@ x-airflow-common:
   &airflow-common
   image: my-airflow-image
   user: "${AIRFLOW_UID:-50000}"
- 
+  group_add:
+    - "990" 
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: "LocalExecutor"
@@ -11,6 +12,7 @@ x-airflow-common:
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW_CONN_SPARK_DEFAULT: "spark://spark-master:7077"
+    AIRFLOW_CONN_DOCKER_DEFAULT: "docker://local/var/run/docker.sock"
     PYSPARK_DRIVER_PYTHON: "/usr/local/bin/python3"
     PYSPARK_PYTHON: "/usr/local/bin/python3"
   volumes:
@@ -18,6 +20,7 @@ x-airflow-common:
     - ./airflow/logs:/opt/airflow/logs:rw
     - ./airflow/plugins:/opt/airflow/plugins:rw
     - ./spark/apps:/opt/spark_apps:ro
+    - /var/run/docker.sock:/var/run/docker.sock
   networks:
     - nebula-net 
   depends_on:
