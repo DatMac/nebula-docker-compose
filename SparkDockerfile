@@ -9,7 +9,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends python3.7 python3-pip && \
     rm -rf /var/lib/apt/lists/*
 
-RUN python3.6 -m pip install \
+RUN python3.7 -m pip install \
     dataclasses \
     "Faker==14.2.1" \
     "typing-extensions==4.1.1"
