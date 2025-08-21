@@ -549,7 +549,7 @@ services:
     user: "1001:1001"
     environment:
       - SPARK_MODE=master
-      - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
+      - SPARK_OPTS=--conf spark.driver.memory=1g --conf spark.driver.cores=1 --conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
       - PYSPARK_PYTHON=/usr/local/bin/python3
     ports:
       - "8080:8080"
@@ -571,6 +571,8 @@ services:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
       - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_CORES=1
       - PYSPARK_PYTHON=/usr/local/bin/python3
     depends_on:
       - spark-master
