@@ -11,6 +11,7 @@ x-airflow-common:
     AIRFLOW__CORE__FERNET_KEY: "A0C4Hjk1ToTD3_BkfQFSijHqH4pKXuw5UUM4yDuE1i0="
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: "Asia/Bangkok"
     AIRFLOW_CONN_SPARK_DEFAULT: "spark://spark-master:7077"
     AIRFLOW_CONN_DOCKER_DEFAULT: "docker://local/var/run/docker.sock"
     PYSPARK_DRIVER_PYTHON: "/usr/local/bin/python3"
@@ -43,7 +44,7 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-      - --timezone_name=UTC+08:00
+      - --timezone_name=UTC+07:00
       - --default_parts_num=10
       - --default_replica_factor=1
       - --heartbeat_interval_secs=10
@@ -82,7 +83,7 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-      - --timezone_name=UTC+08:00
+      - --timezone_name=UTC+07:00
       - --default_parts_num=10
       - --default_replica_factor=1
       - --heartbeat_interval_secs=10
@@ -121,7 +122,7 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-      - --timezone_name=UTC+08:00
+      - --timezone_name=UTC+07:00
       - --default_parts_num=10
       - --default_replica_factor=1
       - --heartbeat_interval_secs=10
@@ -160,7 +161,7 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-      - --timezone_name=UTC+08:00
+      - --timezone_name=UTC+07:00
       - --heartbeat_interval_secs=10
       - --raft_heartbeat_interval_secs=30
       - --raft_rpc_timeout_ms=500
@@ -215,7 +216,7 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-      - --timezone_name=UTC+08:00
+      - --timezone_name=UTC+07:00
       - --heartbeat_interval_secs=10
       - --raft_heartbeat_interval_secs=30
       - --raft_rpc_timeout_ms=500
@@ -270,7 +271,7 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-      - --timezone_name=UTC+08:00
+      - --timezone_name=UTC+07:00
       - --heartbeat_interval_secs=10
       - --raft_heartbeat_interval_secs=30
       - --raft_rpc_timeout_ms=500
@@ -324,7 +325,7 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-      - --timezone_name=UTC+08:00
+      - --timezone_name=UTC+07:00
       - --default_collate=utf8_bin
       - --accept_partial_success=false
       - --session_reclaim_interval_secs=60
@@ -383,7 +384,7 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-      - --timezone_name=UTC+08:00
+      - --timezone_name=UTC+07:00
       - --default_collate=utf8_bin
       - --accept_partial_success=false
       - --session_reclaim_interval_secs=60
@@ -442,7 +443,7 @@ services:
       - --log_dir=/logs
       - --v=0
       - --minloglevel=0
-      - --timezone_name=UTC+08:00
+      - --timezone_name=UTC+07:00
       - --default_collate=utf8_bin
       - --accept_partial_success=false
       - --session_reclaim_interval_secs=60
@@ -549,7 +550,7 @@ services:
     user: "1001:1001"
     environment:
       - SPARK_MODE=master
-      - SPARK_OPTS=--conf spark.driver.memory=1g --conf spark.driver.cores=1 --conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
+      - SPARK_OPTS=--conf spark.driver.memory=3g --conf spark.driver.cores=1 --conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
       - PYSPARK_PYTHON=/usr/local/bin/python3
     ports:
       - "8080:8080"
@@ -571,7 +572,7 @@ services:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
       - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
-      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_MEMORY=3g
       - SPARK_WORKER_CORES=1
       - PYSPARK_PYTHON=/usr/local/bin/python3
     depends_on:
