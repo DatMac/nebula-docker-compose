@@ -5,26 +5,23 @@ import time
 import sys
 
 from faker import Faker
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, Row
 from pyspark.sql.types import (
-    StructType, StructField, StringType, DateType, TimestampType, 
+    StructType, StructField, StringType, DateType, TimestampType,
     IntegerType, LongType, DoubleType, BooleanType
 )
 
 
 # --- Configuration ---
-NUM_CUSTOMERS = 100_000
-NUM_CELL_TOWERS = 5000
-NUM_CALLS = 2_000_000
-NUM_SMS = 5_000_000
-NUM_DATA_SESSIONS = 10_000_000
-NUM_APP_SESSIONS = 20_000_000
+NUM_CUSTOMERS = 10_000
+NUM_CELL_TOWERS = 500
+NUM_CALLS = 200_000
+NUM_SMS = 500_000
+NUM_DATA_SESSIONS = 1_000_000
+NUM_APP_SESSIONS = 2_000_000
 
 # HDFS output paths
 HDFS_BASE_PATH = "hdfs://namenode:8020/tmp/telecom"
-
-# Initialize Faker for data generation
-fake = Faker()
 
 # --- Predefined Catalog Data ---
 SERVICE_PLANS = [
@@ -50,127 +47,113 @@ APPLICATIONS = [
     {'app_id': 'app_teams', 'app_name': 'Microsoft Teams', 'category': 'Productivity'}
 ]
 
-# --- Helper Functions and Data Generation ---
-def get_random_timestamp(start_date="-2y"):
-    return fake.date_time_between(start_date=start_date, end_date='now')
 
-def print_progress(current, total, task_name=""):
-    if total == 0: return
-    update_frequency = max(1, total // 100)
-    if current % update_frequency == 0 or current == total:
-        percent = 100 * (current / float(total))
-        bar_length = 40
-        filled_length = int(bar_length * current // total)
-        bar = '█' * filled_length + '-' * (bar_length - filled_length)
-        sys.stdout.write(f"\r  -> Progress ({task_name}): |{bar}| {percent:.1f}% Complete ({current}/{total})")
-        sys.stdout.flush()
-        if current == total: sys.stdout.write("\n")
+# --- Helper Function ---
+def get_random_timestamp(fake_instance, start_date="-2y"):
+    return fake_instance.date_time_between(start_date=start_date, end_date='now')
 
-def create_customer_data(num_customers):
+# --- Distributed Data Generation Functions ---
+
+def generate_customers_df(spark, num_customers):
+    """Generates customer data in a distributed manner."""
     print(f"--- Generating {num_customers} Customers ---")
-    data = []
-    for i in range(num_customers):
-        data.append((
-            str(uuid.uuid4()), f"CUST-{i+1:08d}", fake.first_name(), fake.last_name(), fake.date_of_birth(minimum_age=18, maximum_age=90),
-            random.choice(['Male', 'Female', 'Other']), fake.street_address(), fake.city(), fake.state_abbr(), fake.zipcode(),
-            fake.email(), fake.phone_number(), random.choice(['Prepaid', 'Postpaid', 'Business']),
-            random.choice(['Active', 'Suspended', 'Deactivated']), fake.date_time_between(start_date="-5y", end_date='now'),
-            random.randint(300, 850), round(random.uniform(20.0, 150.0), 2), round(random.random(), 3), random.choice([True, False])
-        ))
-        print_progress(i + 1, num_customers, "Customers")
-    return data
+    
+    def generate_partition(iterator):
+        fake = Faker()
+        for i in iterator:
+            yield (
+                str(uuid.uuid4()), f"CUST-{i+1:08d}", fake.first_name(), fake.last_name(), fake.date_of_birth(minimum_age=18, maximum_age=90),
+                random.choice(['Male', 'Female', 'Other']), fake.street_address(), fake.city(), fake.state_abbr(), fake.zipcode(),
+                fake.email(), fake.phone_number(), random.choice(['Prepaid', 'Postpaid', 'Business']),
+                random.choice(['Active', 'Suspended', 'Deactivated']), get_random_timestamp(fake, "-5y"),
+                random.randint(300, 850), round(random.uniform(20.0, 150.0), 2), round(random.random(), 3), random.choice([True, False])
+            )
 
-def create_devices_and_numbers_for_customers(customer_ids):
+    rdd = spark.sparkContext.parallelize(range(num_customers), numSlices=9) 
+    return rdd.mapPartitions(generate_partition)
+
+
+def generate_devices_and_numbers_df(spark, customer_ids_bc):
+    """Generates devices and phone numbers for customers in a distributed manner."""
     print("--- Generating Devices and Phone Numbers for Customers ---")
-    device_data, phone_number_data, has_device_edges, has_phone_number_edges = [], [], [], []
-    device_models = ['iPhone 15', 'Samsung Galaxy S25', 'Google Pixel 9', 'iPhone 14 Pro']
-    manufacturers = ['Apple', 'Samsung', 'Google']
-    num_customers = len(customer_ids)
-    for i, cid in enumerate(customer_ids):
-        num_assets = random.randint(1, 2)
-        for j in range(num_assets):
-            is_primary = (j == 0)
-            device_vid = str(uuid.uuid4())
-            device_data.append((
-                device_vid, f"{random.randint(10**14, 10**15 - 1)}", random.choice(device_models), random.choice(manufacturers),
-                random.choice(['iOS', 'Android']), f"{random.randint(10, 17)}.{random.randint(0, 5)}",
-                fake.date_object(end_datetime=datetime.now()), get_random_timestamp("-1y"), random.choice([True, False]), 'Active'
-            ))
-            has_device_edges.append((cid, device_vid, get_random_timestamp("-3y"), None, is_primary))
-            number_vid = str(uuid.uuid4())
-            phone_number_data.append((number_vid, fake.phone_number(), random.randint(1, 200), 'Mobile', get_random_timestamp("-4y"), None))
-            has_phone_number_edges.append((cid, number_vid, get_random_timestamp("-4y")))
-        print_progress(i + 1, num_customers, "Customer Assets")
-    return device_data, phone_number_data, has_device_edges, has_phone_number_edges
+    num_customers = len(customer_ids_bc.value)
 
-def create_cell_tower_data(num_towers):
+    def generate_partition(iterator):
+        fake = Faker()
+        device_models = ['iPhone 15', 'Samsung Galaxy S25', 'Google Pixel 9', 'iPhone 14 Pro']
+        manufacturers = ['Apple', 'Samsung', 'Google']
+        
+        for i in iterator:
+            cid = customer_ids_bc.value[i]
+            num_assets = random.randint(1, 2)
+            for j in range(num_assets):
+                is_primary = (j == 0)
+                device_vid = str(uuid.uuid4())
+                number_vid = str(uuid.uuid4())
+                
+                # Yield a dictionary to easily separate into different DataFrames later
+                yield {
+                    'type': 'device', 'data': (
+                        device_vid, f"{random.randint(10**14, 10**15 - 1)}", random.choice(device_models), random.choice(manufacturers),
+                        random.choice(['iOS', 'Android']), f"{random.randint(10, 17)}.{random.randint(0, 5)}",
+                        fake.date_object(end_datetime=datetime.now()), get_random_timestamp(fake, "-1y"), random.choice([True, False]), 'Active'
+                    )
+                }
+                yield {'type': 'has_device', 'data': (cid, device_vid, get_random_timestamp(fake, "-3y"), None, is_primary)}
+                yield {
+                    'type': 'phone_number', 'data': (
+                        number_vid, fake.phone_number(), random.randint(1, 200), 'Mobile', get_random_timestamp(fake, "-4y"), None
+                    )
+                }
+                yield {'type': 'has_phone_number', 'data': (cid, number_vid, get_random_timestamp(fake, "-4y"))}
+
+    rdd = spark.sparkContext.parallelize(range(num_customers), numSlices=9).mapPartitions(generate_partition).cache()
+    
+    # Separate the generated data into different RDDs and convert to DataFrames
+    device_df = rdd.filter(lambda x: x['type'] == 'device').map(lambda x: x['data'])
+    phone_number_df = rdd.filter(lambda x: x['type'] == 'phone_number').map(lambda x: x['data'])
+    has_device_df = rdd.filter(lambda x: x['type'] == 'has_device').map(lambda x: x['data'])
+    has_phone_number_df = rdd.filter(lambda x: x['type'] == 'has_phone_number').map(lambda x: x['data'])
+    
+    return device_df, phone_number_df, has_device_df, has_phone_number_df
+
+def generate_cell_towers_df(spark, num_towers):
+    """Generates cell tower data in a distributed manner."""
     print(f"--- Generating {num_towers} Cell Towers ---")
-    data = []
-    for i in range(num_towers):
-        capacity = random.choice([1000, 2000, 5000])
-        data.append((
-            str(uuid.uuid4()), f"TOWER-{i:04d}", float(fake.latitude()), float(fake.longitude()), fake.city(), fake.state_abbr(),
-            fake.zipcode(), random.choice(['4G', '5G']), capacity, random.randint(100, capacity - 50),
-            random.choice(['Active', 'Under Maintenance'])
-        ))
-        print_progress(i + 1, num_towers, "Cell Towers")
-    return data
 
-def create_static_vertex_data(catalog_data):
-    return [(str(uuid.uuid4()),) + tuple(item.values()) for item in catalog_data]
+    def generate_partition(iterator):
+        fake = Faker()
+        for i in iterator:
+            capacity = random.choice([1000, 2000, 5000])
+            yield (
+                str(uuid.uuid4()), f"TOWER-{i:04d}", float(fake.latitude()), float(fake.longitude()), fake.city(), fake.state_abbr(),
+                fake.zipcode(), random.choice(['4G', '5G']), capacity, random.randint(100, capacity - 50),
+                random.choice(['Active', 'Under Maintenance'])
+            )
 
-def create_relationships(customer_ids, phone_number_ids, device_ids, service_plan_ids, cell_tower_ids, app_ids):
-    print("--- Generating Relationship (Edge) Data ---")
-    subscribes_to_data, makes_call_data, sends_sms_data, uses_data_data, uses_app_data = [], [], [], [], []
-    total_customers = len(customer_ids)
-    for i, cid in enumerate(customer_ids):
-        num_subscriptions = random.randint(1, 3)
-        if num_subscriptions > len(service_plan_ids): num_subscriptions = len(service_plan_ids)
-        subscribed_plans = random.sample(service_plan_ids, k=num_subscriptions)
-        for plan_id in subscribed_plans:
-            subscribes_to_data.append((cid, plan_id, get_random_timestamp(), fake.date_object()))
-        print_progress(i + 1, total_customers, "SUBSCRIBES_TO")
-    for i in range(NUM_CALLS):
-        src_num, dst_num = random.sample(phone_number_ids, 2)
-        makes_call_data.append((src_num, dst_num, 0, get_random_timestamp(), random.randint(5, 3600), 'Voice', random.choice(['Answered', 'Missed', 'Voicemail']), random.choice(cell_tower_ids), random.choice(cell_tower_ids), round(random.uniform(1.0, 50.0), 2), round(random.uniform(0.0, 2.0), 3)))
-        print_progress(i + 1, NUM_CALLS, "MAKES_CALL")
-    for i in range(NUM_SMS):
-        src_num, dst_num = random.sample(phone_number_ids, 2)
-        sends_sms_data.append((src_num, dst_num, 0, get_random_timestamp(), random.randint(5, 160)))
-        print_progress(i + 1, NUM_SMS, "SENDS_SMS")
-    for i in range(NUM_DATA_SESSIONS):
-        start_time = get_random_timestamp()
-        uses_data_data.append((random.choice(device_ids), random.choice(cell_tower_ids), 0, start_time, start_time + timedelta(minutes=random.randint(1, 60)), round(random.uniform(0.1, 50.0), 3), round(random.uniform(1.0, 1000.0), 3), random.choice(['4G', '5G'])))
-        print_progress(i + 1, NUM_DATA_SESSIONS, "USES_DATA")
-    for i in range(NUM_APP_SESSIONS):
-        uses_app_data.append((random.choice(device_ids), random.choice(app_ids), 0, get_random_timestamp(), random.randint(1, 120), round(random.uniform(1, 500), 2)))
-        print_progress(i + 1, NUM_APP_SESSIONS, "USES_APP")
-    return subscribes_to_data, makes_call_data, sends_sms_data, uses_data_data, uses_app_data
+    rdd = spark.sparkContext.parallelize(range(num_towers), numSlices=9)
+    return rdd.mapPartitions(generate_partition)
+
+def generate_relationships_df(spark, num_records, name, generator_func):
+    """Generic function to generate relationship (edge) data frames."""
+    print(f"--- Generating {num_records} for {name} ---")
+
+    def generate_partition(iterator):
+        fake = Faker()
+        for _ in iterator:
+            yield generator_func(fake)
+            
+    rdd = spark.sparkContext.parallelize(range(num_records), numSlices=9)
+    return rdd.mapPartitions(generate_partition)
 
 
 if __name__ == "__main__":
     start_time = time.time()
     spark = SparkSession.builder.appName("TelecomDataGenerator").getOrCreate()
+    sc = spark.sparkContext
     print(f"Spark Session created. Starting data generation at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # 1. Generate Data in memory
-    customer_data = create_customer_data(NUM_CUSTOMERS)
-    cell_tower_data = create_cell_tower_data(NUM_CELL_TOWERS)
-    service_plan_data = create_static_vertex_data(SERVICE_PLANS)
-    application_data = create_static_vertex_data(APPLICATIONS)
-    customer_ids = [c[0] for c in customer_data]
-    device_data, phone_number_data, has_device_edges, has_phone_number_edges = create_devices_and_numbers_for_customers(customer_ids)
-    
-    print("\nExtracting vertex IDs for relationship generation...")
-    device_ids, phone_number_ids = [d[0] for d in device_data], [p[0] for p in phone_number_data]
-    cell_tower_ids, service_plan_ids = [ct[0] for ct in cell_tower_data], [sp[0] for sp in service_plan_data]
-    application_ids = [a[0] for a in application_data]
-    
-    subscribes_to_data, makes_call_data, sends_sms_data, uses_data_data, uses_app_data = create_relationships(
-        customer_ids, phone_number_ids, device_ids, service_plan_ids, cell_tower_ids, application_ids
-    )
-
-    # 2. DEFINE EXPLICIT SCHEMAS
+    # 1. Define Schemas 
     print("\n--- Defining explicit schemas for DataFrames ---")
     customer_schema = StructType([
         StructField("customerID:ID(Customer)", StringType(), False), StructField("customer_id", StringType(), False), StructField("first_name", StringType(), True),
@@ -189,7 +172,6 @@ if __name__ == "__main__":
         StructField("status", StringType(), True)
     ])
     
-    # This schema fixes the error by telling Spark the `deactivation_date` is a nullable TimestampType
     phone_number_schema = StructType([
         StructField("phoneNumberID:ID(Phone_Number)", StringType(), False), StructField("phone_number", StringType(), False),
         StructField("country_code", LongType(), True), StructField("number_type", StringType(), True),
@@ -227,26 +209,115 @@ if __name__ == "__main__":
         StructField(":START_ID(Customer)", StringType(), False), StructField(":END_ID(Service_Plan)", StringType(), False),
         StructField("subscription_date", TimestampType(), True), StructField("renewal_date", DateType(), True)
     ])
-    
-    # 3. Create Spark DataFrames using the explicit schemas
-    print("\n--- Creating Spark DataFrames from generated data ---")
-    customer_df = spark.createDataFrame(customer_data, schema=customer_schema)
-    device_df = spark.createDataFrame(device_data, schema=device_schema)
-    phone_number_df = spark.createDataFrame(phone_number_data, schema=phone_number_schema)
-    cell_tower_df = spark.createDataFrame(cell_tower_data, schema=cell_tower_schema)
-    service_plan_df = spark.createDataFrame(service_plan_data, schema=service_plan_schema)
-    application_df = spark.createDataFrame(application_data, schema=application_schema)
 
-    has_device_df = spark.createDataFrame(has_device_edges, schema=has_device_schema)
-    has_phone_number_df = spark.createDataFrame(has_phone_number_edges, schema=has_phone_number_schema)
-    subscribes_to_df = spark.createDataFrame(subscribes_to_data, schema=subscribes_to_schema)
+        makes_call_schema = StructType([
+        StructField(":START_ID(Phone_Number)", StringType(), False),
+        StructField(":END_ID(Phone_Number)", StringType(), False),
+        StructField(":RANK", IntegerType(), True),
+        StructField("call_timestamp", TimestampType(), True),
+        StructField("duration_seconds", IntegerType(), True),
+        StructField("call_type", StringType(), True),
+        StructField("call_result", StringType(), True),
+        StructField("start_tower_id", StringType(), True),
+        StructField("end_tower_id", StringType(), True),
+        StructField("jitter_ms", DoubleType(), True),
+        StructField("packet_loss_percent", DoubleType(), True)
+    ])
+
+    sends_sms_schema = StructType([
+        StructField(":START_ID(Phone_Number)", StringType(), False),
+        StructField(":END_ID(Phone_Number)", StringType(), False),
+        StructField(":RANK", IntegerType(), True),
+        StructField("sms_timestamp", TimestampType(), True),
+        StructField("message_length", IntegerType(), True)
+    ])
+
+    uses_data_schema = StructType([
+        StructField(":START_ID(Device)", StringType(), False),
+        StructField(":END_ID(Cell_Tower)", StringType(), False),
+        StructField(":RANK", IntegerType(), True),
+        StructField("session_start_time", TimestampType(), True),
+        StructField("session_end_time", TimestampType(), True),
+        StructField("data_uploaded_mb", DoubleType(), True),
+        StructField("data_downloaded_mb", DoubleType(), True),
+        StructField("network_type", StringType(), True)
+    ])
+
+    uses_app_schema = StructType([
+        StructField(":START_ID(Device)", StringType(), False),
+        StructField(":END_ID(Application)", StringType(), False),
+        StructField(":RANK", IntegerType(), True),
+        StructField("session_start_time", TimestampType(), True),
+        StructField("duration_minutes", IntegerType(), True),
+        StructField("data_consumed_mb", DoubleType(), True)
+    ])
+    # 2. Generate Vertex Data in a DISTRIBUTED way
+    customer_df = generate_customers_df(spark, NUM_CUSTOMERS).toDF(customer_schema)
+    customer_df.cache() # Cache for reuse
+
+    cell_tower_df = generate_cell_towers_df(spark, NUM_CELL_TOWERS).toDF(cell_tower_schema)
+    cell_tower_df.cache()
+
+    # For small, static data, creating a DF from a local list is fine
+    service_plan_df = spark.createDataFrame([(str(uuid.uuid4()),) + tuple(item.values()) for item in SERVICE_PLANS], schema=service_plan_schema)
+    application_df = spark.createDataFrame([(str(uuid.uuid4()),) + tuple(item.values()) for item in APPLICATIONS], schema=application_schema)
+
+    # Collect IDs for relationship generation. For very large numbers of IDs, a join strategy would be better.
+    print("\nExtracting vertex IDs for relationship generation...")
+    customer_ids = [row[0] for row in customer_df.select(customer_schema.fields[0].name).collect()]
+    cell_tower_ids = [row[0] for row in cell_tower_df.select(cell_tower_schema.fields[0].name).collect()]
+    service_plan_ids = [row[0] for row in service_plan_df.select(service_plan_schema.fields[0].name).collect()]
+    application_ids = [row[0] for row in application_df.select(application_schema.fields[0].name).collect()]
+
+    # Broadcast smaller ID lists to all worker nodes
+    customer_ids_bc = sc.broadcast(customer_ids)
+    cell_tower_ids_bc = sc.broadcast(cell_tower_ids)
+    service_plan_ids_bc = sc.broadcast(service_plan_ids)
+    application_ids_bc = sc.broadcast(application_ids)
     
-    # For these, inference is less risky, but being explicit is still better.
-    # Note that RANK is not part of the nGQL schema but is useful for some loaders. Let's make it an Integer.
-    makes_call_df = spark.createDataFrame(makes_call_data, [":START_ID(Phone_Number)", ":END_ID(Phone_Number)", ":RANK", "call_timestamp", "duration_seconds", "call_type", "call_result", "start_tower_id", "end_tower_id", "jitter_ms", "packet_loss_percent"])
-    sends_sms_df = spark.createDataFrame(sends_sms_data, [":START_ID(Phone_Number)", ":END_ID(Phone_Number)", ":RANK", "sms_timestamp", "message_length"])
-    uses_data_df = spark.createDataFrame(uses_data_data, [":START_ID(Device)", ":END_ID(Cell_Tower)", ":RANK", "session_start_time", "session_end_time", "data_uploaded_mb", "data_downloaded_mb", "network_type"])
-    uses_app_df = spark.createDataFrame(uses_app_data, [":START_ID(Device)", ":END_ID(Application)", ":RANK", "session_start_time", "duration_minutes", "data_consumed_mb"])
+    # Generate devices and phone numbers which depend on customer IDs
+    device_rdd, phone_number_rdd, has_device_rdd, has_phone_number_rdd = generate_devices_and_numbers_df(spark, customer_ids_bc)
+    device_df = device_rdd.toDF(device_schema)
+    phone_number_df = phone_number_rdd.toDF(phone_number_schema)
+    has_device_df = has_device_rdd.toDF(has_device_schema)
+    has_phone_number_df = has_phone_number_rdd.toDF(has_phone_number_schema)
+    device_df.cache()
+    phone_number_df.cache()
+
+    device_ids = [row[0] for row in device_df.select(device_schema.fields[0].name).collect()]
+    phone_number_ids = [row[0] for row in phone_number_df.select(phone_number_schema.fields[0].name).collect()]
+    device_ids_bc = sc.broadcast(device_ids)
+    phone_number_ids_bc = sc.broadcast(phone_number_ids)
+
+    # 3. Generate Edge/Relationship Data in a DISTRIBUTED way
+    
+    # SUBSCRIBES_TO
+    def subscribes_to_generator(fake):
+        return (random.choice(customer_ids_bc.value), random.choice(service_plan_ids_bc.value), get_random_timestamp(fake), fake.date_object())
+    subscribes_to_df = generate_relationships_df(spark, NUM_CUSTOMERS * 2, "SUBSCRIBES_TO", subscribes_to_generator).toDF(subscribes_to_schema)
+
+    # MAKES_CALL
+    def makes_call_generator(fake):
+        src_num, dst_num = random.sample(phone_number_ids_bc.value, 2)
+        return (src_num, dst_num, 0, get_random_timestamp(fake), random.randint(5, 3600), 'Voice', random.choice(['Answered', 'Missed', 'Voicemail']), random.choice(cell_tower_ids_bc.value), random.choice(cell_tower_ids_bc.value), round(random.uniform(1.0, 50.0), 2), round(random.uniform(0.0, 2.0), 3))
+    makes_call_df = generate_relationships_df(spark, NUM_CALLS, "MAKES_CALL", makes_call_generator).toDF([":START_ID(Phone_Number)", ":END_ID(Phone_Number)", ":RANK", "call_timestamp", "duration_seconds", "call_type", "call_result", "start_tower_id", "end_tower_id", "jitter_ms", "packet_loss_percent"])
+
+    # SENDS_SMS
+    def sends_sms_generator(fake):
+        src_num, dst_num = random.sample(phone_number_ids_bc.value, 2)
+        return (src_num, dst_num, 0, get_random_timestamp(fake), random.randint(5, 160))
+    sends_sms_df = generate_relationships_df(spark, NUM_SMS, "SENDS_SMS", sends_sms_generator).toDF([":START_ID(Phone_Number)", ":END_ID(Phone_Number)", ":RANK", "sms_timestamp", "message_length"])
+    
+    # USES_DATA
+    def uses_data_generator(fake):
+        start_time = get_random_timestamp(fake)
+        return (random.choice(device_ids_bc.value), random.choice(cell_tower_ids_bc.value), 0, start_time, start_time + timedelta(minutes=random.randint(1, 60)), round(random.uniform(0.1, 50.0), 3), round(random.uniform(1.0, 1000.0), 3), random.choice(['4G', '5G']))
+    uses_data_df = generate_relationships_df(spark, NUM_DATA_SESSIONS, "USES_DATA", uses_data_generator).toDF([":START_ID(Device)", ":END_ID(Cell_Tower)", ":RANK", "session_start_time", "session_end_time", "data_uploaded_mb", "data_downloaded_mb", "network_type"])
+
+    # USES_APP
+    def uses_app_generator(fake):
+        return (random.choice(device_ids_bc.value), random.choice(application_ids_bc.value), 0, get_random_timestamp(fake), random.randint(1, 120), round(random.uniform(1, 500), 2))
+    uses_app_df = generate_relationships_df(spark, NUM_APP_SESSIONS, "USES_APP", uses_app_generator).toDF([":START_ID(Device)", ":END_ID(Application)", ":RANK", "session_start_time", "duration_minutes", "data_consumed_mb"])
 
     # 4. Write DataFrames to HDFS
     print(f"\n--- Writing data to HDFS at {HDFS_BASE_PATH} ---")
