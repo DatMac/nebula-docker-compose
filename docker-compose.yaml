@@ -29,6 +29,22 @@ x-airflow-common:
       condition: service_healthy 
 
 services:
+  cassandra:
+    image: cassandra:3.11
+    container_name: cassandra
+    hostname: cassandra
+    ports:
+      - "9042:9042"
+    volumes:
+      - /data/cassandra:/var/lib/cassandra
+    networks:
+      - nebula-net
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
   metad0:
     image: docker.io/vesoft/nebula-metad:v3.8.0
     environment:
@@ -550,7 +566,7 @@ services:
     user: "1001:1001"
     environment:
       - SPARK_MODE=master
-      - SPARK_OPTS=--conf spark.driver.memory=4g --conf spark.driver.cores=1 --conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
+      - SPARK_OPTS=--conf spark.driver.memory=2g --conf spark.driver.cores=1 --conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
       - PYSPARK_PYTHON=/usr/local/bin/python3
     ports:
       - "8080:8080"
