@@ -35,7 +35,7 @@ def test_hdfs_connection_on_executor(_):
     classpath = os.environ.get("CLASSPATH")
     if classpath:
         print("--- [Executor] CLASSPATH environment variable is SET.")
-        # print(f"--- [Executor] CLASSPATH value: {classpath}") # Uncomment for verbose debugging
+        print(f"--- [Executor] CLASSPATH value: {classpath}") # Uncomment for verbose debugging
     else:
         print("--- [Executor] WARNING: CLASSPATH environment variable is NOT SET. This is a likely cause of failure.")
 
@@ -44,7 +44,7 @@ def test_hdfs_connection_on_executor(_):
         
         # This uses the legacy API for PyArrow 0.14.1
         # It should automatically pick up Hadoop configuration if CLASSPATH is set correctly.
-        hdfs = pa.hdfs.connect()
+        hdfs = pa.hdfs.connect(host='namenode', port=8020, driver='libhdfs')
 
         print("--- [Executor] SUCCESS: Successfully connected to HDFS!")
         
