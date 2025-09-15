@@ -88,7 +88,7 @@ def load_from_nebula(spark: SparkSession, config: Dict[str, Any]) -> (DataFrame,
         .option("metaAddress", config['nebula']['meta_address'])
         .option("user", config["nebula"]["user"])
         .option("passwd", config["nebula"]["password"])
-        .option("partitionNumber", 2)
+        .option("partitionNumber", 3)
         .load()
         .withColumnRenamed("_vertexId", "id")
     )
@@ -107,7 +107,7 @@ def load_from_nebula(spark: SparkSession, config: Dict[str, Any]) -> (DataFrame,
             .option("metaAddress", config['nebula']['meta_address'])
             .option("user", config["nebula"]["user"])
             .option("passwd", config["nebula"]["password"])
-            .option("partitionNumber", 2)
+            .option("partitionNumber", 3)
             .load()
             .select(
                 F.col("_srcId").alias("src"),

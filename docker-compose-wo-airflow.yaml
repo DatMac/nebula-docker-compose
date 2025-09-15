@@ -1,33 +1,3 @@
-x-airflow-common:
-  &airflow-common
-  image: my-airflow-image
-  user: "${AIRFLOW_UID:-50000}"
-  group_add:
-    - "990" 
-  environment:
-    &airflow-common-env
-    AIRFLOW__CORE__EXECUTOR: "LocalExecutor"
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@postgres_db:5432/airflow"
-    AIRFLOW__CORE__FERNET_KEY: "A0C4Hjk1ToTD3_BkfQFSijHqH4pKXuw5UUM4yDuE1i0="
-    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-    AIRFLOW__CORE__DEFAULT_TIMEZONE: "Asia/Bangkok"
-    AIRFLOW_CONN_SPARK_DEFAULT: "spark://spark-master:7077"
-    AIRFLOW_CONN_DOCKER_DEFAULT: "docker://local/var/run/docker.sock"
-    PYSPARK_DRIVER_PYTHON: "/usr/local/bin/python3"
-    PYSPARK_PYTHON: "/usr/local/bin/python3"
-  volumes:
-    - ./airflow/dags:/opt/airflow/dags:rw
-    - ./airflow/logs:/opt/airflow/logs:rw
-    - ./airflow/plugins:/opt/airflow/plugins:rw
-    - ./spark/apps:/opt/spark_apps:ro
-    - /var/run/docker.sock:/var/run/docker.sock
-  networks:
-    - nebula-net 
-  depends_on:
-    postgres_db:
-      condition: service_healthy 
-
 services:
   cassandra:
     image: cassandra:3.11
@@ -49,7 +19,7 @@ services:
     image: docker.io/vesoft/nebula-metad:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --local_ip=metad0
@@ -88,7 +58,7 @@ services:
     image: docker.io/vesoft/nebula-metad:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --local_ip=metad1
@@ -127,7 +97,7 @@ services:
     image: docker.io/vesoft/nebula-metad:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --local_ip=metad2
@@ -166,7 +136,7 @@ services:
     image: docker.io/vesoft/nebula-storaged:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --local_ip=storaged0
@@ -185,7 +155,6 @@ services:
       - --disable_page_cache=false
       - --enable_rocksdb_prefix_filtering=true
       - --enable_rocksdb_whole_key_filtering=true
-      # - --rocksdb_filtering_prefix_length=12
       - --enable_partitioned_index_filter=false
       - --query_concurrently=true
       - --num_io_threads=16
@@ -193,7 +162,6 @@ services:
       - --num_worker_threads=32
       - --max_concurrent_subtasks=10
       - --memory_tracker_limit_ratio=0.8
-      # - --rocksdb_db_options={"max_total_wal_size":"0"}
     depends_on:
       - metad0
       - metad1
@@ -221,7 +189,7 @@ services:
     image: docker.io/vesoft/nebula-storaged:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --local_ip=storaged1
@@ -240,7 +208,6 @@ services:
       - --disable_page_cache=false
       - --enable_rocksdb_prefix_filtering=true
       - --enable_rocksdb_whole_key_filtering=true
-      # - --rocksdb_filtering_prefix_length=12
       - --enable_partitioned_index_filter=false
       - --query_concurrently=true
       - --num_io_threads=16
@@ -248,7 +215,6 @@ services:
       - --num_worker_threads=32
       - --max_concurrent_subtasks=10
       - --memory_tracker_limit_ratio=0.8
-      # - --rocksdb_db_options={"max_total_wal_size":"0"}
     depends_on:
       - metad0
       - metad1
@@ -276,7 +242,7 @@ services:
     image: docker.io/vesoft/nebula-storaged:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --local_ip=storaged2
@@ -295,7 +261,6 @@ services:
       - --disable_page_cache=false
       - --enable_rocksdb_prefix_filtering=true
       - --enable_rocksdb_whole_key_filtering=true
-      # - --rocksdb_filtering_prefix_length=12
       - --enable_partitioned_index_filter=false
       - --query_concurrently=true
       - --num_io_threads=16
@@ -303,7 +268,6 @@ services:
       - --num_worker_threads=32
       - --max_concurrent_subtasks=10
       - --memory_tracker_limit_ratio=0.8
-      # - --rocksdb_db_options={"max_total_wal_size":"0"}
     depends_on:
       - metad0
       - metad1
@@ -331,7 +295,7 @@ services:
     image: docker.io/vesoft/nebula-graphd:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --port=9669
@@ -390,7 +354,7 @@ services:
     image: docker.io/vesoft/nebula-graphd:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --port=9669
@@ -449,7 +413,7 @@ services:
     image: docker.io/vesoft/nebula-graphd:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --port=9669
@@ -503,11 +467,11 @@ services:
     restart: on-failure
     cap_add:
       - SYS_PTRACE
-  
+
   console:
     image: docker.io/vesoft/nebula-console:v3.6.0
     entrypoint: ""
-    command: 
+    command:
       - sh
       - -c
       - |
@@ -562,7 +526,7 @@ services:
       - nebula-net
 
   spark-master:
-    image: my-spark-app-image 
+    image: my-spark-app-image
     user: "1001:1001"
     environment:
       - SPARK_MODE=master
@@ -582,15 +546,19 @@ services:
       - nebula-net
 
   spark-worker:
-    image: my-spark-app-image 
+    image: my-spark-app-image
     user: "1001:1001"
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
       - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
-      - SPARK_WORKER_MEMORY=6g
+      - SPARK_WORKER_MEMORY=4g
       - SPARK_WORKER_CORES=2
       - PYSPARK_PYTHON=/usr/local/bin/python3
+    deploy:
+      resources:
+        limits:
+          memory: 5g
     depends_on:
       - spark-master
     volumes:
@@ -600,93 +568,6 @@ services:
     networks:
       - nebula-net
 
-  postgres_db:
-    image: postgres:13
-    container_name: airflow_postgres_db
-    environment:
-      - POSTGRES_USER=airflow
-      - POSTGRES_PASSWORD=airflow
-      - POSTGRES_DB=airflow
-    volumes:
-      - airflow_postgres_meta_data:/var/lib/postgresql/data
-    networks:
-      - nebula-net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  airflow-init:
-    <<: *airflow-common
-    container_name: airflow_init
-    command:
-      - bash
-      - -c
-      - |
-        # This script is idempotent, meaning it can be run multiple times safely.
-        
-        # 1. Initialize or upgrade the Airflow database
-        echo "Initializing or upgrading the Airflow database..."
-        airflow db upgrade
-        
-        # 2. Check if the 'admin' user already exists
-        echo "Checking for admin user..."
-        if ! airflow users list | grep -q "admin"; then
-          # Create the admin user only if it does not exist
-          echo "Admin user not found. Creating admin user..."
-          airflow users create \
-            --username admin \
-            --firstname Admin \
-            --lastname User \
-            --role Admin \
-            --email admin@example.com \
-            --password admin
-        else
-          echo "Admin user already exists. Skipping creation."
-        fi
-        
-        # 3. Add or update the Spark connection (this command is idempotent by default)
-        # echo "Adding/updating connection..."
-        # airflow connections add 'spark-spark' --conn-type 'spark' --conn-host 'spark://spark-master' --conn-port '7077' --conn-extra '{"master": "spark://spark-master:7077"}';
-    user: "0:0"
-    depends_on:
-      postgres_db:
-        condition: service_healthy
-
-  airflow-webserver:
-    <<: *airflow-common
-    container_name: airflow_webserver
-    command: webserver
-    ports:
-      - "8081:8080" 
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 90s 
-    depends_on:
-      airflow-init:
-        condition: service_completed_successfully
-
-  airflow-scheduler:
-    <<: *airflow-common
-    container_name: airflow_scheduler
-    command: scheduler
-    healthcheck:
-      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname $$(hostname)"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-    depends_on:
-      airflow-init:
-        condition: service_completed_successfully
-
 networks:
   nebula-net:
     driver: bridge
-
-volumes:
-  airflow_postgres_meta_data:
-    driver: local
