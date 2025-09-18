@@ -222,57 +222,105 @@ def _write_to_hdfs_from_driver(local_path: str, hdfs_path: str, config: Dict[str
         logger.error(f"Failed to upload to HDFS via WebHDFS. Error: {e}")
         raise e
 
-def save_partitions_for_pyg(spark: SparkSession, enriched_nodes_df: DataFrame, edges_df: DataFrame,
-                           total_num_nodes: int, total_num_edges: int, config: Dict[str, Any]):
+def save_maps_in_parallel(node_id_map: DataFrame, edge_map_df: DataFrame, temp_path: str):
     """
-    Formats and saves partitioned graph data, including features, labels, and masks.
-    """
-    logger.info("Starting PyG-compatible save of partitions to HDFS.")
-    output_path = config["output_path"]
+    Saves node and edge mapping data to a temporary HDFS location in a distributed
+    manner (as CSVs) to avoid collecting all data on the driver.
 
-    # --- 1. Create and Save Global Mapping Files (Unchanged) ---
-    logger.info("Generating and saving global node and edge maps.")
-    threshold = config.get("driver_memory_threshold", 100_000_000) # Use .get for safety
-    if total_num_nodes > threshold:
-        logger.warning(f"WARNING: Number of nodes ({total_num_nodes}) exceeds threshold ({threshold}).")
-        logger.warning("Collecting node map to driver may cause OutOfMemoryError. Increase --driver-memory.")
+    Args:
+        node_id_map (DataFrame): DataFrame with ["global_node_id", "partition_id"].
+        edge_map_df (DataFrame): DataFrame with ["global_edge_id", "partition_id"].
+        temp_path (str): The HDFS path to save the intermediate part-files.
+    """
+    logger.info(f"Saving node and edge maps in parallel to temporary location: {temp_path}")
     
-    node_map_pd = enriched_nodes_df.select("global_node_id", "partition_id").toPandas()
+    # Spark will write multiple part-files in each directory, which is scalable.
+    node_id_map.write.mode("overwrite").csv(os.path.join(temp_path, "node_map_parts"))
+    edge_map_df.write.mode("overwrite").csv(os.path.join(temp_path, "edge_map_parts"))
+
+
+def assemble_maps_from_parts(spark: SparkSession, temp_path: str, output_path: str,
+                             total_num_nodes: int, total_num_edges: int, config: Dict[str, Any]):
+    """
+    Assembles the final node/edge map tensors from the parallel-saved part-files.
+    This function runs on the driver and collects only the necessary mapping data.
+
+    Args:
+        spark (SparkSession): The Spark session.
+        temp_path (str): The HDFS path where intermediate part-files are stored.
+        output_path (str): The final HDFS output path for the .pt files.
+        total_num_nodes (int): The total number of nodes in the graph.
+        total_num_edges (int): The total number of edges in the graph.
+        config (Dict[str, Any]): The application configuration.
+    """
+    logger.info("Assembling final map files from parallel parts...")
+    
+    # --- Assemble Node Map ---
+    node_map_parts_df = spark.read.csv(os.path.join(temp_path, "node_map_parts"), schema="global_node_id LONG, partition_id INT")
+    node_map_pd = node_map_parts_df.toPandas()
+    
     node_map_tensor = torch.full((total_num_nodes,), -1, dtype=torch.long)
     node_map_tensor[node_map_pd['global_node_id'].values] = torch.tensor(node_map_pd['partition_id'].values, dtype=torch.long)
 
-    if total_num_edges > threshold:
-        logger.warning(f"WARNING: Number of edges ({total_num_edges}) exceeds threshold ({threshold}).")
-        logger.warning("Collecting edge map to driver may cause OutOfMemoryError. Increase --driver-memory.")
-    
-    node_partition_map = enriched_nodes_df.select("id", "partition_id")
-    edges_with_partition = edges_df.join(node_partition_map, edges_df.src == node_partition_map.id, "inner")
-    edge_map_pd = edges_with_partition.select("global_edge_id", "partition_id").toPandas()
+    # --- Assemble Edge Map ---
+    edge_map_parts_df = spark.read.csv(os.path.join(temp_path, "edge_map_parts"), schema="global_edge_id LONG, partition_id INT")
+    edge_map_pd = edge_map_parts_df.toPandas()
+
     edge_map_tensor = torch.full((total_num_edges,), -1, dtype=torch.long)
     edge_map_tensor[edge_map_pd['global_edge_id'].values] = torch.tensor(edge_map_pd['partition_id'].values, dtype=torch.long)
 
+    # --- Save Final Tensors ---
     with tempfile.TemporaryDirectory() as tmpdir:
-        torch.save(node_map_tensor, os.path.join(tmpdir, "node_map.pt"))
-        _write_to_hdfs_from_driver(os.path.join(tmpdir, "node_map.pt"), f"{output_path}/node_map.pt", config)
-        torch.save(edge_map_tensor, os.path.join(tmpdir, "edge_map.pt"))
-        _write_to_hdfs_from_driver(os.path.join(tmpdir, "edge_map.pt"), f"{output_path}/edge_map.pt", config)
-        meta = {'num_parts': config["partitions"], 'is_hetero': False, 'node_types': None, 'edge_types': None, 'is_sorted': True}
-        with open(os.path.join(tmpdir, "META.json"), 'w') as f:
-            json.dump(meta, f)
-        _write_to_hdfs_from_driver(os.path.join(tmpdir, "META.json"), f"{output_path}/META.json", config)
+        # Save node_map.pt
+        node_map_path = os.path.join(tmpdir, "node_map.pt")
+        torch.save(node_map_tensor, node_map_path)
+        _write_to_hdfs_from_driver(node_map_path, f"{output_path}/node_map.pt", config)
 
-    # --- 2. Prepare Data for Distributed Processing (Add mask columns) ---
-    nodes_for_grouping = enriched_nodes_df.select(
-        "partition_id", F.lit("node").alias("type"), "global_node_id", 
-        "features", "label", "train_mask", "val_mask", "test_mask", # <-- ADDED MASKS and LABEL
-        F.lit(None).cast(LongType()).alias("src_global"), F.lit(None).cast(LongType()).alias("dst_global"), F.lit(None).cast(LongType()).alias("global_edge_id")
-    )
-    # The rest of data prep is unchanged
+        # Save edge_map.pt
+        edge_map_path = os.path.join(tmpdir, "edge_map.pt")
+        torch.save(edge_map_tensor, edge_map_path)
+        _write_to_hdfs_from_driver(edge_map_path, f"{output_path}/edge_map.pt", config)
+    
+    logger.info("Successfully assembled and saved final map files.")
+    
+    # --- Clean up temporary directory ---
+    try:
+        logger.info(f"Cleaning up temporary map directory: {temp_path}")
+        # Use the hdfs library client to remove the temporary directory
+        namenode_host = config["hdfs_base_uri"].split('//')[1].split(':')[0]
+        webhdfs_url = f"http://{namenode_host}:50070"
+        client = InsecureClient(webhdfs_url, user=config.get("hdfs_user", "root"))
+        client.delete(temp_path, recursive=True)
+    except Exception as e:
+        logger.warning(f"Could not clean up temporary directory {temp_path}. Please remove it manually. Error: {e}")
+
+def save_partitioned_data(spark: SparkSession, enriched_nodes_df: DataFrame, edges_df: DataFrame,
+                           total_num_nodes: int, config: Dict[str, Any]):
+    """
+    Saves the partitioned graph data (node features, graph structure) in a distributed manner.
+    This function does NOT handle the global map files.
+    """
+    logger.info("Starting distributed save of partition data (graph, features, etc.)...")
+    output_path = config["output_path"]
+
+    # --- 1. Save META.json (a quick driver-side operation) ---
+    meta = {'num_parts': config["partitions"], 'is_hetero': False, 'node_types': None, 'edge_types': None, 'is_sorted': True}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        meta_path = os.path.join(tmpdir, "META.json")
+        with open(meta_path, 'w') as f:
+            json.dump(meta, f)
+        _write_to_hdfs_from_driver(meta_path, f"{output_path}/META.json", config)
+
+    # --- 2. Prepare Data for Distributed Processing (same as before) ---
     intra_partition_edges = (
         edges_df.join(enriched_nodes_df.alias("src_map"), F.col("src_global") == F.col("src_map.global_node_id"))
         .join(enriched_nodes_df.alias("dst_map"), F.col("dst_global") == F.col("dst_map.global_node_id"))
         .where(F.col("src_map.partition_id") == F.col("dst_map.partition_id"))
         .select(F.col("src_map.partition_id").alias("partition_id"), "src_global", "dst_global", "global_edge_id")
+    )
+    nodes_for_grouping = enriched_nodes_df.select(
+        "partition_id", F.lit("node").alias("type"), "global_node_id", "features", "label", "train_mask", "val_mask", "test_mask",
+        F.lit(None).cast(LongType()).alias("src_global"), F.lit(None).cast(LongType()).alias("dst_global"), F.lit(None).cast(LongType()).alias("global_edge_id")
     )
     edges_for_grouping = intra_partition_edges.select(
         "partition_id", F.lit("edge").alias("type"), F.lit(None).alias("global_node_id"),
@@ -282,47 +330,36 @@ def save_partitions_for_pyg(spark: SparkSession, enriched_nodes_df: DataFrame, e
     )
     grouped_data = nodes_for_grouping.unionByName(edges_for_grouping)
 
-    # --- 3. Define and Execute Pandas UDF (Updated to save labels and masks) ---
+    # --- 3. Define and Execute Pandas UDF (same as before) ---
     b_total_num_nodes = spark.sparkContext.broadcast(total_num_nodes)
     namenode_host = config["hdfs_base_uri"].split('//')[1].split(':')[0]
     b_webhdfs_url = spark.sparkContext.broadcast(f"http://{namenode_host}:50070")
     b_output_path = spark.sparkContext.broadcast(output_path)
     b_hdfs_user = spark.sparkContext.broadcast(config.get("hdfs_user", "root"))
     
-    result_schema = StructType([
-        StructField("partition_id", IntegerType()), StructField("success", BooleanType())
-    ])
+    result_schema = StructType([StructField("partition_id", IntegerType()), StructField("success", BooleanType())])
 
     def process_and_save_partition_fn(pdf: pd.DataFrame) -> pd.DataFrame:
+        # This UDF's internal logic is identical to the last correct version
         if pdf.empty: return pd.DataFrame({'partition_id': [], 'success': []})
         partition_id = int(pdf['partition_id'].iloc[0])
         try:
             client = InsecureClient(b_webhdfs_url.value, user=b_hdfs_user.value)
             with tempfile.TemporaryDirectory() as tmpdir:
                 nodes_pd = pdf[pdf['type'] == 'node'].sort_values('global_node_id').reset_index()
-                
                 feature_array = np.array(nodes_pd['features'].tolist(), dtype=np.float32)
                 label_array = nodes_pd['label'].to_numpy(dtype=np.int64)
                 train_mask_array = nodes_pd['train_mask'].to_numpy(dtype=np.bool_)
                 val_mask_array = nodes_pd['val_mask'].to_numpy(dtype=np.bool_)
                 test_mask_array = nodes_pd['test_mask'].to_numpy(dtype=np.bool_)
-                
                 feats_dict = {
-                    'x': torch.from_numpy(feature_array),
-                    'y': torch.from_numpy(label_array).to(torch.long),
-                    'train_mask': torch.from_numpy(train_mask_array),
-                    'val_mask': torch.from_numpy(val_mask_array),
+                    'x': torch.from_numpy(feature_array), 'y': torch.from_numpy(label_array).to(torch.long),
+                    'train_mask': torch.from_numpy(train_mask_array), 'val_mask': torch.from_numpy(val_mask_array),
                     'test_mask': torch.from_numpy(test_mask_array)
                 }
-
-                node_feats = {
-                    'global_id': torch.tensor(nodes_pd['global_node_id'].values, dtype=torch.long),
-                    'feats': feats_dict
-                }
-
+                node_feats = {'global_id': torch.tensor(nodes_pd['global_node_id'].values, dtype=torch.long), 'feats': feats_dict}
                 node_feats_path = os.path.join(tmpdir, "node_feats.pt")
                 torch.save(node_feats, node_feats_path)
-                
                 edges_pd = pdf[pdf['type'] == 'edge'].sort_values('dst_global').reset_index()
                 if not edges_pd.empty:
                     graph = {'row': torch.tensor(edges_pd['src_global'].values, dtype=torch.long), 'col': torch.tensor(edges_pd['dst_global'].values, dtype=torch.long), 'edge_id': torch.tensor(edges_pd['global_edge_id'].values, dtype=torch.long), 'size': (b_total_num_nodes.value, b_total_num_nodes.value)}
@@ -330,10 +367,8 @@ def save_partitions_for_pyg(spark: SparkSession, enriched_nodes_df: DataFrame, e
                     graph = {'row': torch.empty(0, dtype=torch.long), 'col': torch.empty(0, dtype=torch.long), 'edge_id': torch.empty(0, dtype=torch.long), 'size': (b_total_num_nodes.value, b_total_num_nodes.value)}
                 graph_path = os.path.join(tmpdir, "graph.pt")
                 torch.save(graph, graph_path)
-                
                 edge_feats_path = os.path.join(tmpdir, "edge_feats.pt")
                 torch.save(defaultdict(), edge_feats_path)
-
                 hdfs_partition_dir = f"{b_output_path.value}/part_{partition_id}"
                 client.upload(f"{hdfs_partition_dir}/node_feats.pt", node_feats_path, overwrite=True)
                 client.upload(f"{hdfs_partition_dir}/graph.pt", graph_path, overwrite=True)
@@ -346,7 +381,7 @@ def save_partitions_for_pyg(spark: SparkSession, enriched_nodes_df: DataFrame, e
     
     process_and_save_partition_udf = pandas_udf(process_and_save_partition_fn, result_schema, PandasUDFType.GROUPED_MAP)
     
-    logger.info("Executing save operation on all partitions...")
+    logger.info("Executing save operation for all partitions...")
     result = grouped_data.groupBy("partition_id").apply(process_and_save_partition_udf)
     failed_partitions = result.where(F.col("success") == False).count()
     if failed_partitions > 0:
@@ -525,7 +560,7 @@ def main_1():
             logger.info("Stopping Spark session.")
             spark.stop()
 
-def main():
+def main_2():
     """Main execution function with scalable ID generation."""
     spark = None
     try:
@@ -586,6 +621,80 @@ def main():
         
         edges_df.unpersist()
         final_nodes_df.unpersist()
+
+        logger.info("GNN data preparation pipeline finished successfully.")
+
+    except Exception as e:
+        logger.error(f"An error occurred during the Spark job: {e}", exc_info=True)
+        traceback.print_exc()
+        sys.exit(1)
+    finally:
+        if spark:
+            logger.info("Stopping Spark session.")
+            spark.stop()
+
+def main():
+    """Main execution function with scalable map generation."""
+    spark = None
+    # Define a temporary path for intermediate map files
+    temp_map_path = os.path.join(CONFIG["output_path"], "_tmp_maps")
+    
+    try:
+        spark = create_spark_session(CONFIG)
+        
+        # --- Stage 1: Main Distributed Processing ---
+        logger.info("--- STAGE 1: Starting Main Distributed Graph Processing ---")
+        
+        nodes_df, raw_edges_df = load_from_nebula(spark, CONFIG)
+        
+        # Scalable Node ID Generation
+        node_id_map_rdd = nodes_df.select("id", "cust_id").distinct().rdd.map(lambda row: (row.id, row.cust_id)).zipWithIndex()
+        node_id_map = node_id_map_rdd.map(lambda x: (x[0][0], x[0][1], x[1])).toDF(["id", "cust_id", "global_node_id"])
+
+        nodes_df.cache()
+        node_id_map.cache()
+
+        # Scalable Edge ID Generation
+        src_node_map = node_id_map.select("id", "global_node_id").withColumnRenamed("id", "src") .withColumnRenamed("global_node_id", "src_global")
+        dst_node_map = node_id_map.select("id", "global_node_id").withColumnRenamed("id", "dst").withColumnRenamed("global_node_id", "dst_global")
+        edges_with_global_nodes = raw_edges_df.join(src_node_map, "src", "inner").join(dst_node_map, "dst", "inner")
+        edge_id_map_rdd = edges_with_global_nodes.select("src_global", "dst_global").rdd.zipWithIndex()
+        edge_id_map_df = edge_id_map_rdd.map(lambda x: (x[0][0], x[0][1], x[1])).toDF(["src_global", "dst_global", "global_edge_id"])
+        edges_df = edges_with_global_nodes.join(edge_id_map_df, ["src_global", "dst_global"], "inner")
+        
+        edges_df.cache()
+        total_num_nodes = node_id_map.count()
+        total_num_edges = edges_df.count()
+        logger.info(f"Total nodes: {total_num_nodes}, Total edges: {total_num_edges}")
+
+        partitioned_nodes_df = partition_graph(nodes_df, raw_edges_df, CONFIG["partitions"])
+        
+        partitioned_nodes_with_global_id = partitioned_nodes_df.join(node_id_map, "id", "inner")
+        nodes_df.unpersist()
+
+        enriched_nodes_df = enrich_data_from_cassandra(spark, partitioned_nodes_with_global_id, CONFIG)
+        final_nodes_df = add_temporal_train_test_split(enriched_nodes_df)
+        final_nodes_df.cache()
+
+        # Create the mapping dataframes needed for the parallel save
+        node_map_for_save = final_nodes_df.select("global_node_id", "partition_id")
+        edge_map_for_save = edges_df.join(final_nodes_df.select("id", "partition_id"), edges_df.src == final_nodes_df.id, "inner") \
+                                    .select("global_edge_id", "partition_id")
+
+        # Execute the parallel saving operations
+        save_maps_in_parallel(node_map_for_save, edge_map_for_save, temp_map_path)
+        save_partitioned_data(spark, final_nodes_df, edges_df, total_num_nodes, CONFIG)
+
+        edges_df.unpersist()
+        final_nodes_df.unpersist()
+        node_id_map.unpersist()
+        
+        logger.info("--- STAGE 1: Main Distributed Processing Finished ---")
+
+        # --- Stage 2: Final Assembly on Driver ---
+        logger.info("--- STAGE 2: Starting Final Map Assembly on Driver ---")
+        assemble_maps_from_parts(spark, temp_map_path, CONFIG["output_path"], total_num_nodes, total_num_edges, CONFIG)
+        logger.info("--- STAGE 2: Final Map Assembly Finished ---")
 
         logger.info("GNN data preparation pipeline finished successfully.")
 
