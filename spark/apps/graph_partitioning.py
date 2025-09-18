@@ -72,6 +72,8 @@ def create_spark_session(config: Dict[str, Any]) -> SparkSession:
         .config("spark.jars.packages", ",".join(config["spark_packages"]))
         .config(f"spark.cassandra.connection.host", config["cassandra"]["host"])
         .config(f"spark.cassandra.connection.port", config["cassandra"]["port"])
+        .config(f"spark.local.dir", "/opt/bitnami/spark/tmp-dir")
+        .config(f"spark.sql.shuffle.partitions", 100)
     )
     
     spark = spark_builder.getOrCreate()
@@ -132,7 +134,7 @@ def partition_graph(nodes_df: DataFrame, edges_df: DataFrame, num_partitions: in
     """Partitions the graph using GraphFrames' Label Propagation Algorithm (LPA)."""
     logger.info("Partitioning graph using Label Propagation Algorithm...")
     g = GraphFrame(nodes_df, edges_df)
-    partition_assignments = g.labelPropagation(maxIter=5)
+    partition_assignments = g.labelPropagation(maxIter=1)
     
     final_partitions_df = partition_assignments.withColumn(
         "partition_id", (F.col("label") % num_partitions).cast("int")
@@ -150,12 +152,17 @@ def enrich_data_from_cassandra(spark: SparkSession, partitioned_nodes_df: DataFr
         spark.read.format("org.apache.spark.sql.cassandra")
         .options(table=config['cassandra']['table'], keyspace=config['cassandra']['keyspace'])
         .load()
-        .withColumnRenamed("cust_id", "id")
     )
-    enriched_nodes_df = partitioned_nodes_df.join(features_df, "id", "inner")
+    enriched_nodes_df = partitioned_nodes_df.join(features_df, "cust_id", "inner")
+    if enriched_nodes_df.rdd.isEmpty():
+        raise ValueError(
+            "The INNER join on 'cust_id' between nodes from Nebula and features from Cassandra "
+            "resulted in an empty DataFrame. Please check for data consistency in the 'cust_id' "
+            "column across both data sources."
+        )
     
-    logger.info("Successfully created plan to enrich nodes.")
-    return enriched_nodes_df
+    logger.info("Successfully enriched node data from Cassandra.")
+    return enriched_nodes_df 
 
 def add_temporal_train_test_split(df: DataFrame, train_perc: float = 0.7, val_perc: float = 0.15) -> DataFrame:
     """
@@ -456,7 +463,7 @@ def run_test_2():
             logger.info("Stopping Spark session.")
             spark.stop()
 
-def main():
+def main_1():
     """Main execution function."""
     spark = None
     try:
@@ -468,21 +475,30 @@ def main():
         logger.info("Generating global 0-indexed IDs for nodes and edges...")
         node_window = Window.orderBy("id")
         node_id_map = nodes_df.select("id").distinct().withColumn("global_node_id", F.row_number().over(node_window) - 1)
-        nodes_with_global_id = nodes_df.join(node_id_map, "id", "inner")
         
-        edges_with_global_nodes = raw_edges_df.join(node_id_map.alias("src_map"), F.col("src") == F.col("src_map.id")) \
-                                              .join(node_id_map.alias("dst_map"), F.col("dst") == F.col("dst_map.id")) \
-                                              .select("src_map.global_node_id as src_global", "dst_map.global_node_id as dst_global", "src", "dst")
+        # 1. Prepare two versions of the map, one for sources and one for destinations
+        src_node_map = node_id_map.withColumnRenamed("id", "src") \
+                                  .withColumnRenamed("global_node_id", "src_global")
         
+        dst_node_map = node_id_map.withColumnRenamed("id", "dst") \
+                                  .withColumnRenamed("global_node_id", "dst_global")
+
+        # 2. Join the raw edges with the renamed maps. This is unambiguous.
+        edges_with_global_nodes = raw_edges_df.join(src_node_map, "src", "inner") \
+                                              .join(dst_node_map, "dst", "inner")
+
         edge_window = Window.orderBy("src_global", "dst_global")
         edges_df = edges_with_global_nodes.withColumn("global_edge_id", F.row_number().over(edge_window) - 1)
         edges_df.cache()
         
-        total_num_nodes = nodes_with_global_id.count()
+        total_num_nodes = nodes_df.select("id").distinct().count() # More robust count
         total_num_edges = edges_df.count()
         logger.info(f"Total nodes: {total_num_nodes}, Total edges: {total_num_edges}")
         
         partitioned_nodes_df = partition_graph(nodes_df, raw_edges_df, CONFIG["partitions"])
+        
+        # We need the nodes_with_global_id for the join
+        nodes_with_global_id = nodes_df.join(node_id_map, "id", "inner")
         nodes_df.unpersist()
 
         partitioned_nodes_with_global_id = partitioned_nodes_df.join(nodes_with_global_id, "id", "inner")
@@ -501,11 +517,86 @@ def main():
 
     except Exception as e:
         logger.error(f"An error occurred during the Spark job: {e}", exc_info=True)
+        # Adding traceback for better debugging in logs
+        traceback.print_exc()
         sys.exit(1)
     finally:
         if spark:
             logger.info("Stopping Spark session.")
             spark.stop()
-            
+
+def main():
+    """Main execution function with scalable ID generation."""
+    spark = None
+    try:
+        spark = create_spark_session(CONFIG)
+        
+        nodes_df, raw_edges_df = load_from_nebula(spark, CONFIG)
+        
+        logger.info("Generating global 0-indexed IDs for nodes and edges (scalable method)...")
+
+        # 1. Generate scalable 0-indexed IDs for NODES
+        # Using RDD's zipWithIndex is the most robust way to do this at scale.
+        # It avoids the global sort that Window.orderBy() causes.
+        node_id_map_rdd = nodes_df.select("id").distinct().rdd.map(lambda row: row.id).zipWithIndex()
+        # Convert back to DataFrame: ["id", "global_node_id"]
+        node_id_map = node_id_map_rdd.toDF(["id", "global_node_id"])
+
+        nodes_df.cache()
+        node_id_map.cache()
+
+        # 2. Join to get global IDs for edges (same unambiguous join as before)
+        src_node_map = node_id_map.withColumnRenamed("id", "src") \
+                                  .withColumnRenamed("global_node_id", "src_global")
+        dst_node_map = node_id_map.withColumnRenamed("id", "dst") \
+                                  .withColumnRenamed("global_node_id", "dst_global")
+        edges_with_global_nodes = raw_edges_df.join(src_node_map, "src", "inner") \
+                                              .join(dst_node_map, "dst", "inner")
+
+        # 3. Generate scalable 0-indexed IDs for EDGES
+        edge_id_map_rdd = edges_with_global_nodes.select("src_global", "dst_global") \
+                                                 .rdd.zipWithIndex()
+        # Convert back to DataFrame: [Row(src_global, dst_global), global_edge_id]
+        edge_id_map_df = edge_id_map_rdd.map(lambda x: (x[0][0], x[0][1], x[1])) \
+                                        .toDF(["src_global", "dst_global", "global_edge_id"])
+
+        # Join the edge IDs back to the full edge DataFrame
+        edges_df = edges_with_global_nodes.join(edge_id_map_df, ["src_global", "dst_global"], "inner")
+        
+        
+        edges_df.cache()
+        total_num_nodes = node_id_map.count()
+        total_num_edges = edges_df.count()
+        logger.info(f"Total nodes: {total_num_nodes}, Total edges: {total_num_edges}")
+
+        partitioned_nodes_df = partition_graph(nodes_df, raw_edges_df, CONFIG["partitions"])
+        
+        nodes_with_global_id = nodes_df.join(node_id_map, "id", "inner")
+        nodes_df.unpersist()
+        node_id_map.unpersist()
+
+        partitioned_nodes_with_global_id = partitioned_nodes_df.join(nodes_with_global_id, "id", "inner")
+        
+        enriched_nodes_df = enrich_data_from_cassandra(spark, partitioned_nodes_with_global_id, CONFIG)
+        
+        final_nodes_df = add_temporal_train_test_split(enriched_nodes_df)
+        final_nodes_df.cache()
+
+        save_partitions_for_pyg(spark, final_nodes_df, edges_df, total_num_nodes, total_num_edges, CONFIG)
+        
+        edges_df.unpersist()
+        final_nodes_df.unpersist()
+
+        logger.info("GNN data preparation pipeline finished successfully.")
+
+    except Exception as e:
+        logger.error(f"An error occurred during the Spark job: {e}", exc_info=True)
+        traceback.print_exc()
+        sys.exit(1)
+    finally:
+        if spark:
+            logger.info("Stopping Spark session.")
+            spark.stop()
+
 if __name__ == "__main__":
-    run_test_2()
+    main()
