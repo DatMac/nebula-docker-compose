@@ -74,6 +74,7 @@ def create_spark_session(config: Dict[str, Any]) -> SparkSession:
         .config(f"spark.cassandra.connection.port", config["cassandra"]["port"])
         .config(f"spark.local.dir", "/opt/bitnami/spark/tmp-dir")
         .config(f"spark.sql.shuffle.partitions", 100)
+        .config("spark.sql.execution.arrow.maxRecordsPerBatch", "1000")
     )
     
     spark = spark_builder.getOrCreate()
