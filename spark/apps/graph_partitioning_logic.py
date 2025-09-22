@@ -142,7 +142,7 @@ def partition_graph(nodes_df: DataFrame, edges_df: DataFrame, num_partitions: in
     ).select("id", "partition_id")
 
     logger.info("Graph partitioning complete. Partition distribution:")
-    final_partitions_df.groupBy("partition_id").count().orderBy("partition_id").show()
+    final_partitions_df.groupBy("partition_id").count().orderBy("partition_id").show(200)
     return final_partitions_df
 
 
@@ -295,27 +295,152 @@ def assemble_maps_from_parts(spark: SparkSession, temp_path: str, output_path: s
     except Exception as e:
         logger.warning(f"Could not clean up temporary directory {temp_path}. Please remove it manually. Error: {e}")
 
-def save_partitioned_data(spark: SparkSession, enriched_nodes_df: DataFrame, edges_df: DataFrame,
+def save_partition_worker(partition_index: int, iterator: iter, config: Dict[str, Any], total_num_nodes: int):
+    """
+    Worker function executed via `mapPartitionsWithIndex`. It processes an
+    iterator of rows for a single Spark partition, creates PyG-compatible files,
+    and uploads them directly to HDFS.
+
+    Args:
+        partition_index (int): The physical index of the Spark RDD partition.
+                               Note: This may not be the same as the logical graph partition ID.
+        iterator (iter): An iterator over the Spark Rows for this partition.
+        config (Dict[str, Any]): The broadcasted application configuration.
+        total_num_nodes (int): The broadcasted total number of nodes in the graph.
+    """
+    # Import necessary libraries within the worker, as this code runs on executors.
+    import pandas as pd
+    import numpy as np
+    import torch
+    import os
+    import tempfile
+    import traceback
+    from collections import defaultdict
+    from hdfs import InsecureClient
+
+    # Consume the iterator to materialize the rows for this partition into a list.
+    rows = list(iterator)
+    if not rows:
+        # If the partition is empty, there's nothing to do.
+        return iter([])
+
+    # Since we repartitioned by 'partition_id', all rows in this iterator should belong
+    # to the same logical graph partition. We can safely get it from the first row.
+    logical_partition_id = rows[0]['partition_id']
+
+    try:
+        # Extract configuration needed for this worker.
+        output_path = config["output_path"]
+        namenode_host = config["hdfs_base_uri"].split('//')[1].split(':')[0]
+        webhdfs_url = f"http://{namenode_host}:50070"
+        hdfs_user = config.get("hdfs_user", "root")
+        client = InsecureClient(webhdfs_url, user=hdfs_user)
+
+        # Convert list of Spark Rows to a Pandas DataFrame for easier manipulation.
+        pdf = pd.DataFrame([row.asDict() for row in rows])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # --- 1. Process Nodes and Create `node_feats.pt` ---
+            nodes_pd = pdf[pdf['type'] == 'node'].sort_values('global_node_id').reset_index(drop=True)
+            
+            # This dictionary structure matches the PyG Partitioner output for homogeneous graphs.
+            node_feats_dict = {
+                'global_id': torch.from_numpy(nodes_pd['global_node_id'].to_numpy(dtype=np.int64)),
+                'feats': {
+                    'x': torch.from_numpy(np.array(nodes_pd['features'].tolist(), dtype=np.float32)),
+                    'y': torch.from_numpy(nodes_pd['label'].to_numpy(dtype=np.int64)).to(torch.long),
+                    'train_mask': torch.from_numpy(nodes_pd['train_mask'].to_numpy(dtype=np.bool_)),
+                    'val_mask': torch.from_numpy(nodes_pd['val_mask'].to_numpy(dtype=np.bool_)),
+                    'test_mask': torch.from_numpy(nodes_pd['test_mask'].to_numpy(dtype=np.bool_)),
+                }
+            }
+            node_feats_path = os.path.join(tmpdir, "node_feats.pt")
+            torch.save(node_feats_dict, node_feats_path)
+
+            # --- 2. Process Edges and Create `graph.pt` ---
+            edges_pd = pdf[pdf['type'] == 'edge']
+            
+            # IMPORTANT: Sort edges by the destination node ID ('dst_global') to mimic
+            # PyG's `sort_csc` behavior, which is required for efficient sampling.
+            edges_pd = edges_pd.sort_values('dst_global').reset_index(drop=True)
+            
+            if not edges_pd.empty:
+                # This dictionary structure matches the PyG Partitioner output for homogeneous graphs.
+                graph_dict = {
+                    'row': torch.from_numpy(edges_pd['src_global'].to_numpy(dtype=np.int64)),
+                    'col': torch.from_numpy(edges_pd['dst_global'].to_numpy(dtype=np.int64)),
+                    'edge_id': torch.from_numpy(edges_pd['global_edge_id'].to_numpy(dtype=np.int64)),
+                    'size': (total_num_nodes, total_num_nodes),
+                }
+            else:
+                # Handle cases where a partition might have no internal edges.
+                graph_dict = {
+                    'row': torch.empty(0, dtype=torch.long),
+                    'col': torch.empty(0, dtype=torch.long),
+                    'edge_id': torch.empty(0, dtype=torch.long),
+                    'size': (total_num_nodes, total_num_nodes),
+                }
+            graph_path = os.path.join(tmpdir, "graph.pt")
+            torch.save(graph_dict, graph_path)
+
+            # --- 3. Create `edge_feats.pt` (empty for now) ---
+            # This matches the PyG Partitioner's behavior when no edge features are present.
+            edge_feats_dict = defaultdict()
+            edge_feats_path = os.path.join(tmpdir, "edge_feats.pt")
+            torch.save(edge_feats_dict, edge_feats_path)
+            
+            # --- 4. Upload all files for this partition to HDFS ---
+            hdfs_partition_dir = f"{output_path}/part_{logical_partition_id}"
+            client.upload(f"{hdfs_partition_dir}/node_feats.pt", node_feats_path, overwrite=True)
+            client.upload(f"{hdfs_partition_dir}/graph.pt", graph_path, overwrite=True)
+            client.upload(f"{hdfs_partition_dir}/edge_feats.pt", edge_feats_path, overwrite=True)
+            
+        # Yield a success status record for this partition.
+        yield (logical_partition_id, True, "Success")
+
+    except Exception:
+        # If any error occurs, yield a failure record with the traceback for debugging.
+        error_msg = f"ERROR processing partition for logical_id={logical_partition_id}:\n{traceback.format_exc()}"
+        print(error_msg) # This will print to the executor's log.
+        yield (logical_partition_id, False, error_msg)
+
+def save_partitions_for_pyg(spark: SparkSession, enriched_nodes_df: DataFrame, edges_df: DataFrame,
                            total_num_nodes: int, config: Dict[str, Any]):
     """
-    Saves the partitioned graph data (node features, graph structure) in a distributed manner.
-    This function does NOT handle the global map files.
+    Saves the partitioned graph data in a PyG-compatible format using a
+    memory-efficient RDD.mapPartitions approach. This is compatible with
+    Spark 2.4 and does not use PyArrow for data serialization.
+
+    Args:
+        spark (SparkSession): The active Spark session.
+        enriched_nodes_df (DataFrame): DataFrame of nodes with features, labels, and partition assignments.
+        edges_df (DataFrame): DataFrame of edges with global source/destination IDs.
+        total_num_nodes (int): The total number of nodes in the graph.
+        config (Dict[str, Any]): The application configuration.
     """
-    logger.info("Starting distributed save of partition data (graph, features, etc.)...")
+    logger.info("Starting distributed save of partition data in PyG-compatible format...")
     output_path = config["output_path"]
 
-    # --- 1. Save META.json (a quick driver-side operation) ---
-    meta = {'num_parts': config["partitions"], 'is_hetero': False, 'node_types': None, 'edge_types': None, 'is_sorted': True}
+    # --- 1. Save `META.json` from the driver ---
+    # This structure matches the one created by the PyG Partitioner for homogeneous graphs.
+    meta = {
+        'num_parts': config["partitions"],
+        'is_hetero': False,
+        'node_types': None,
+        'edge_types': None,
+        'is_sorted': True,  # We ensure this by sorting by destination node in the worker.
+    }
     with tempfile.TemporaryDirectory() as tmpdir:
         meta_path = os.path.join(tmpdir, "META.json")
         with open(meta_path, 'w') as f:
             json.dump(meta, f)
         _write_to_hdfs_from_driver(meta_path, f"{output_path}/META.json", config)
 
-    # --- 2. Prepare Data for Distributed Processing (same as before) ---
+    # --- 2. Prepare a unified DataFrame for nodes and edges ---
+    # This mirrors the logic from your original script.
     intra_partition_edges = (
-        edges_df.join(enriched_nodes_df.alias("src_map"), F.col("src_global") == F.col("src_map.global_node_id"))
-        .join(enriched_nodes_df.alias("dst_map"), F.col("dst_global") == F.col("dst_map.global_node_id"))
+        edges_df.join(enriched_nodes_df.select("global_node_id", "partition_id").alias("src_map"), F.col("src_global") == F.col("src_map.global_node_id"))
+        .join(enriched_nodes_df.select("global_node_id", "partition_id").alias("dst_map"), F.col("dst_global") == F.col("dst_map.global_node_id"))
         .where(F.col("src_map.partition_id") == F.col("dst_map.partition_id"))
         .select(F.col("src_map.partition_id").alias("partition_id"), "src_global", "dst_global", "global_edge_id")
     )
@@ -329,310 +454,41 @@ def save_partitioned_data(spark: SparkSession, enriched_nodes_df: DataFrame, edg
         F.lit(None).cast(BooleanType()).alias("train_mask"), F.lit(None).cast(BooleanType()).alias("val_mask"), F.lit(None).cast(BooleanType()).alias("test_mask"),
         "src_global", "dst_global", "global_edge_id"
     )
-    grouped_data = nodes_for_grouping.unionByName(edges_for_grouping)
+    unified_data_df = nodes_for_grouping.unionByName(edges_for_grouping)
 
-    # --- 3. Define and Execute Pandas UDF (same as before) ---
+    # --- 3. Repartition and Execute Processing via RDD API ---
+    # Repartition by our logical graph 'partition_id'. This is crucial to ensure all data
+    # for a single PyG partition (e.g., part_0) ends up in the same Spark RDD partition.
+    data_to_save_rdd = unified_data_df.repartition(config["partitions"], "partition_id").rdd
+
+    # Broadcast large, read-only variables to all executors for efficiency.
+    b_config = spark.sparkContext.broadcast(config)
     b_total_num_nodes = spark.sparkContext.broadcast(total_num_nodes)
-    namenode_host = config["hdfs_base_uri"].split('//')[1].split(':')[0]
-    b_webhdfs_url = spark.sparkContext.broadcast(f"http://{namenode_host}:50070")
-    b_output_path = spark.sparkContext.broadcast(output_path)
-    b_hdfs_user = spark.sparkContext.broadcast(config.get("hdfs_user", "root"))
-    
-    result_schema = StructType([StructField("partition_id", IntegerType()), StructField("success", BooleanType())])
 
-    def process_and_save_partition_fn(pdf: pd.DataFrame) -> pd.DataFrame:
-        # This UDF's internal logic is identical to the last correct version
-        if pdf.empty: return pd.DataFrame({'partition_id': [], 'success': []})
-        partition_id = int(pdf['partition_id'].iloc[0])
-        try:
-            client = InsecureClient(b_webhdfs_url.value, user=b_hdfs_user.value)
-            with tempfile.TemporaryDirectory() as tmpdir:
-                nodes_pd = pdf[pdf['type'] == 'node'].sort_values('global_node_id').reset_index()
-                feature_array = np.array(nodes_pd['features'].tolist(), dtype=np.float32)
-                label_array = nodes_pd['label'].to_numpy(dtype=np.int64)
-                train_mask_array = nodes_pd['train_mask'].to_numpy(dtype=np.bool_)
-                val_mask_array = nodes_pd['val_mask'].to_numpy(dtype=np.bool_)
-                test_mask_array = nodes_pd['test_mask'].to_numpy(dtype=np.bool_)
-                feats_dict = {
-                    'x': torch.from_numpy(feature_array), 'y': torch.from_numpy(label_array).to(torch.long),
-                    'train_mask': torch.from_numpy(train_mask_array), 'val_mask': torch.from_numpy(val_mask_array),
-                    'test_mask': torch.from_numpy(test_mask_array)
-                }
-                node_feats = {'global_id': torch.tensor(nodes_pd['global_node_id'].values, dtype=torch.long), 'feats': feats_dict}
-                node_feats_path = os.path.join(tmpdir, "node_feats.pt")
-                torch.save(node_feats, node_feats_path)
-                edges_pd = pdf[pdf['type'] == 'edge'].sort_values('dst_global').reset_index()
-                if not edges_pd.empty:
-                    graph = {'row': torch.tensor(edges_pd['src_global'].values, dtype=torch.long), 'col': torch.tensor(edges_pd['dst_global'].values, dtype=torch.long), 'edge_id': torch.tensor(edges_pd['global_edge_id'].values, dtype=torch.long), 'size': (b_total_num_nodes.value, b_total_num_nodes.value)}
-                else:
-                    graph = {'row': torch.empty(0, dtype=torch.long), 'col': torch.empty(0, dtype=torch.long), 'edge_id': torch.empty(0, dtype=torch.long), 'size': (b_total_num_nodes.value, b_total_num_nodes.value)}
-                graph_path = os.path.join(tmpdir, "graph.pt")
-                torch.save(graph, graph_path)
-                edge_feats_path = os.path.join(tmpdir, "edge_feats.pt")
-                torch.save(defaultdict(), edge_feats_path)
-                hdfs_partition_dir = f"{b_output_path.value}/part_{partition_id}"
-                client.upload(f"{hdfs_partition_dir}/node_feats.pt", node_feats_path, overwrite=True)
-                client.upload(f"{hdfs_partition_dir}/graph.pt", graph_path, overwrite=True)
-                client.upload(f"{hdfs_partition_dir}/edge_feats.pt", edge_feats_path, overwrite=True)
-            success = True
-        except Exception as e:
-            print(f"ERROR processing partition {partition_id}: {e}")
-            success = False
-        return pd.DataFrame([{'partition_id': partition_id, 'success': success}])
+    # Define the schema for the results we expect back from our worker function.
+    result_schema = StructType([
+        StructField("partition_id", IntegerType(), True),
+        StructField("success", BooleanType(), False),
+        StructField("message", StringType(), False)
+    ])
     
-    process_and_save_partition_udf = pandas_udf(process_and_save_partition_fn, result_schema, PandasUDFType.GROUPED_MAP)
+    logger.info("Executing save operation for all partitions using RDD.mapPartitionsWithIndex...")
     
-    logger.info("Executing save operation for all partitions...")
-    result = grouped_data.groupBy("partition_id").apply(process_and_save_partition_udf)
-    failed_partitions = result.where(F.col("success") == False).count()
-    if failed_partitions > 0:
-        logger.error(f"{failed_partitions} partitions failed to save. Check executor logs for details.")
+    # Use a lambda function to pass the broadcasted variables to our worker.
+    result_rdd = data_to_save_rdd.mapPartitionsWithIndex(
+        lambda idx, iterator: save_partition_worker(idx, iterator, b_config.value, b_total_num_nodes.value)
+    )
+    
+    # Convert the result RDD back to a DataFrame to check for failures.
+    result_df = result_rdd.toDF(result_schema).coalesce(1)
+    failed_partitions = result_df.where(F.col("success") == False).collect()
+    
+    if failed_partitions:
+        logger.error(f"{len(failed_partitions)} partitions failed to save. Check executor logs for detailed tracebacks.")
+        for row in failed_partitions:
+            logger.error(f"Partition [{row['partition_id']}] failed with message: {row['message']}")
     else:
         logger.info("All partitions processed and saved successfully.")
-
-def run_test_2():
-    """
-    Main function modified to be a self-contained test for the 
-    save_partitions_for_pyg function.
-    
-    It creates mock data in memory and calls the function to be tested,
-    bypassing all external data sources.
-    """
-    # Temporarily modify config for local testing
-    test_config = CONFIG.copy()
-    test_config["spark_master_url"] = "local[*]"
-    test_config["output_path"] = "/tmp/pyg_dataset_TEST"
-    test_config["partitions"] = 2
-
-    spark = None
-    try:
-        spark = create_spark_session(test_config)
-        
-        logger.info("--- Starting Test for save_partitions_for_pyg ---")
-
-        # --- 1. Create Mock Enriched Nodes DataFrame ---
-        logger.info("Step 1: Creating mock enriched_nodes_df...")
-        
-        # Ensure all feature vectors have the SAME length (e.g., 8)
-        feature_dim = 8
-        mock_node_data = [
-            # id, global_node_id, partition_id, features, label, train, val, test
-            ('CUST-00000001', 0, 0, [float(v) for v in np.random.rand(feature_dim)], 1, True, False, False),
-            ('CUST-00000002', 1, 0, [float(v) for v in np.random.rand(feature_dim)], 0, True, False, False),
-            ('CUST-00000003', 2, 0, [float(v) for v in np.random.rand(feature_dim)], 0, True, False, False),
-            ('CUST-00000004', 3, 0, [float(v) for v in np.random.rand(feature_dim)], 1, True, False, False),
-            ('CUST-00000005', 4, 0, [float(v) for v in np.random.rand(feature_dim)], 0, True, False, False),
-            ('CUST-00000006', 5, 1, [float(v) for v in np.random.rand(feature_dim)], 0, True, False, False),
-            ('CUST-00000007', 6, 1, [float(v) for v in np.random.rand(feature_dim)], 1, False, True, False),
-            ('CUST-00000008', 7, 1, [float(v) for v in np.random.rand(feature_dim)], 0, False, True, False),
-            ('CUST-00000009', 8, 1, [float(v) for v in np.random.rand(feature_dim)], 1, False, False, True),
-            ('CUST-00000010', 9, 1, [float(v) for v in np.random.rand(feature_dim)], 0, False, False, True),
-        ]
-        
-        node_schema = StructType([
-            StructField("id", StringType(), False),
-            StructField("global_node_id", LongType(), False),
-            StructField("partition_id", IntegerType(), False),
-            StructField("features", ArrayType(FloatType()), False),
-            StructField("label", IntegerType(), False),
-            StructField("train_mask", BooleanType(), False),
-            StructField("val_mask", BooleanType(), False),
-            StructField("test_mask", BooleanType(), False),
-        ])
-
-        enriched_nodes_df = spark.createDataFrame(mock_node_data, schema=node_schema)
-        
-        logger.info("Mock enriched_nodes_df created successfully:")
-        enriched_nodes_df.show()
-
-        # --- 2. Create Mock Edges DataFrame ---
-        logger.info("Step 2: Creating mock edges_df...")
-        mock_edge_data = [
-            # src, dst, src_global, dst_global, global_edge_id
-            ('CUST-00000001', 'CUST-00000002', 0, 1, 0),
-            ('CUST-00000002', 'CUST-00000003', 1, 2, 1),
-            ('CUST-00000004', 'CUST-00000005', 3, 4, 2), # Intra-partition edge (0)
-            ('CUST-00000005', 'CUST-00000006', 4, 5, 3), # Inter-partition edge
-            ('CUST-00000007', 'CUST-00000008', 6, 7, 4), # Intra-partition edge (1)
-            ('CUST-00000009', 'CUST-00000010', 8, 9, 5), # Intra-partition edge (1)
-            ('CUST-00000001', 'CUST-00000008', 0, 7, 6), # Inter-partition edge
-        ]
-        
-        edge_schema = StructType([
-            StructField("src", StringType(), False),
-            StructField("dst", StringType(), False),
-            StructField("src_global", LongType(), False),
-            StructField("dst_global", LongType(), False),
-            StructField("global_edge_id", LongType(), False),
-        ])
-
-        edges_df = spark.createDataFrame(mock_edge_data, schema=edge_schema)
-        
-        logger.info("Mock edges_df created successfully:")
-        edges_df.show()
-
-        # --- 3. Calculate Inputs and Call the Function ---
-        logger.info("Step 3: Calculating inputs and calling save_partitions_for_pyg...")
-        total_num_nodes = enriched_nodes_df.count()
-        total_num_edges = edges_df.count()
-        
-        enriched_nodes_df.cache()
-        edges_df.cache()
-
-        save_partitions_for_pyg(
-            spark=spark,
-            enriched_nodes_df=enriched_nodes_df,
-            edges_df=edges_df,
-            total_num_nodes=total_num_nodes,
-            total_num_edges=total_num_edges,
-            config=test_config
-        )
-
-        logger.info("--- Test for save_partitions_for_pyg finished successfully. ---")
-        logger.info(f"Check the output in HDFS at: {test_config['hdfs_base_uri']}{test_config['output_path']}")
-
-    except Exception as e:
-        logger.error("!!! An error occurred during the test !!!", exc_info=True)
-        sys.exit(1)
-    finally:
-        if spark:
-            logger.info("Stopping Spark session.")
-            spark.stop()
-
-def main_1():
-    """Main execution function."""
-    spark = None
-    try:
-        spark = create_spark_session(CONFIG)
-        
-        nodes_df, raw_edges_df = load_from_nebula(spark, CONFIG)
-        nodes_df.cache()
-        
-        logger.info("Generating global 0-indexed IDs for nodes and edges...")
-        node_window = Window.orderBy("id")
-        node_id_map = nodes_df.select("id").distinct().withColumn("global_node_id", F.row_number().over(node_window) - 1)
-        
-        # 1. Prepare two versions of the map, one for sources and one for destinations
-        src_node_map = node_id_map.withColumnRenamed("id", "src") \
-                                  .withColumnRenamed("global_node_id", "src_global")
-        
-        dst_node_map = node_id_map.withColumnRenamed("id", "dst") \
-                                  .withColumnRenamed("global_node_id", "dst_global")
-
-        # 2. Join the raw edges with the renamed maps. This is unambiguous.
-        edges_with_global_nodes = raw_edges_df.join(src_node_map, "src", "inner") \
-                                              .join(dst_node_map, "dst", "inner")
-
-        edge_window = Window.orderBy("src_global", "dst_global")
-        edges_df = edges_with_global_nodes.withColumn("global_edge_id", F.row_number().over(edge_window) - 1)
-        edges_df.cache()
-        
-        total_num_nodes = nodes_df.select("id").distinct().count() # More robust count
-        total_num_edges = edges_df.count()
-        logger.info(f"Total nodes: {total_num_nodes}, Total edges: {total_num_edges}")
-        
-        partitioned_nodes_df = partition_graph(nodes_df, raw_edges_df, CONFIG["partitions"])
-        
-        # We need the nodes_with_global_id for the join
-        nodes_with_global_id = nodes_df.join(node_id_map, "id", "inner")
-        nodes_df.unpersist()
-
-        partitioned_nodes_with_global_id = partitioned_nodes_df.join(nodes_with_global_id, "id", "inner")
-        
-        enriched_nodes_df = enrich_data_from_cassandra(spark, partitioned_nodes_with_global_id, CONFIG)
-        
-        final_nodes_df = add_temporal_train_test_split(enriched_nodes_df)
-        final_nodes_df.cache()
-
-        save_partitions_for_pyg(spark, final_nodes_df, edges_df, total_num_nodes, total_num_edges, CONFIG)
-        
-        edges_df.unpersist()
-        final_nodes_df.unpersist()
-
-        logger.info("GNN data preparation pipeline finished successfully.")
-
-    except Exception as e:
-        logger.error(f"An error occurred during the Spark job: {e}", exc_info=True)
-        # Adding traceback for better debugging in logs
-        traceback.print_exc()
-        sys.exit(1)
-    finally:
-        if spark:
-            logger.info("Stopping Spark session.")
-            spark.stop()
-
-def main_2():
-    """Main execution function with scalable ID generation."""
-    spark = None
-    try:
-        spark = create_spark_session(CONFIG)
-        
-        nodes_df, raw_edges_df = load_from_nebula(spark, CONFIG)
-        
-        logger.info("Generating global 0-indexed IDs for nodes and edges (scalable method)...")
-
-        # 1. Generate scalable 0-indexed IDs for NODES
-        # Using RDD's zipWithIndex is the most robust way to do this at scale.
-        # It avoids the global sort that Window.orderBy() causes.
-        node_id_map_rdd = nodes_df.select("id").distinct().rdd.map(lambda row: row.id).zipWithIndex()
-        # Convert back to DataFrame: ["id", "global_node_id"]
-        node_id_map = node_id_map_rdd.toDF(["id", "global_node_id"])
-
-        nodes_df.cache()
-        node_id_map.cache()
-
-        # 2. Join to get global IDs for edges (same unambiguous join as before)
-        src_node_map = node_id_map.withColumnRenamed("id", "src") \
-                                  .withColumnRenamed("global_node_id", "src_global")
-        dst_node_map = node_id_map.withColumnRenamed("id", "dst") \
-                                  .withColumnRenamed("global_node_id", "dst_global")
-        edges_with_global_nodes = raw_edges_df.join(src_node_map, "src", "inner") \
-                                              .join(dst_node_map, "dst", "inner")
-
-        # 3. Generate scalable 0-indexed IDs for EDGES
-        edge_id_map_rdd = edges_with_global_nodes.select("src_global", "dst_global") \
-                                                 .rdd.zipWithIndex()
-        # Convert back to DataFrame: [Row(src_global, dst_global), global_edge_id]
-        edge_id_map_df = edge_id_map_rdd.map(lambda x: (x[0][0], x[0][1], x[1])) \
-                                        .toDF(["src_global", "dst_global", "global_edge_id"])
-
-        # Join the edge IDs back to the full edge DataFrame
-        edges_df = edges_with_global_nodes.join(edge_id_map_df, ["src_global", "dst_global"], "inner")
-        
-        
-        edges_df.cache()
-        total_num_nodes = node_id_map.count()
-        total_num_edges = edges_df.count()
-        logger.info(f"Total nodes: {total_num_nodes}, Total edges: {total_num_edges}")
-
-        partitioned_nodes_df = partition_graph(nodes_df, raw_edges_df, CONFIG["partitions"])
-        
-        nodes_with_global_id = nodes_df.join(node_id_map, "id", "inner")
-        nodes_df.unpersist()
-        node_id_map.unpersist()
-
-        partitioned_nodes_with_global_id = partitioned_nodes_df.join(nodes_with_global_id, "id", "inner")
-        
-        enriched_nodes_df = enrich_data_from_cassandra(spark, partitioned_nodes_with_global_id, CONFIG)
-        
-        final_nodes_df = add_temporal_train_test_split(enriched_nodes_df)
-        final_nodes_df.cache()
-
-        save_partitions_for_pyg(spark, final_nodes_df, edges_df, total_num_nodes, total_num_edges, CONFIG)
-        
-        edges_df.unpersist()
-        final_nodes_df.unpersist()
-
-        logger.info("GNN data preparation pipeline finished successfully.")
-
-    except Exception as e:
-        logger.error(f"An error occurred during the Spark job: {e}", exc_info=True)
-        traceback.print_exc()
-        sys.exit(1)
-    finally:
-        if spark:
-            logger.info("Stopping Spark session.")
-            spark.stop()
 
 def main():
     """Main execution function with scalable map generation."""
@@ -674,17 +530,54 @@ def main():
         nodes_df.unpersist()
 
         enriched_nodes_df = enrich_data_from_cassandra(spark, partitioned_nodes_with_global_id, CONFIG)
+
+        # --- DIAGNOSTIC ---
+        logger.info("Counting nodes that did NOT have features in Cassandra, by partition:")
+        enriched_nodes_df.where(F.col("features").isNull()) \
+            .groupBy("partition_id") \
+            .count() \
+            .orderBy("partition_id") \
+            .show(200) # Show more rows to see all partitions
+        # ------------------
+
         final_nodes_df = add_temporal_train_test_split(enriched_nodes_df)
         final_nodes_df.cache()
+        print(f"DEBUG: Count of final_nodes_df before map creation: {final_nodes_df.count()}")
 
         # Create the mapping dataframes needed for the parallel save
         node_map_for_save = final_nodes_df.select("global_node_id", "partition_id")
-        edge_map_for_save = edges_df.join(final_nodes_df.select("id", "partition_id"), edges_df.src == final_nodes_df.id, "inner") \
-                                    .select("global_edge_id", "partition_id")
+        print(f"DEBUG: Count of node_map_for_save: {node_map_for_save.count()}")
+
+        # edge_map_for_save = edges_df.join(final_nodes_df.select("id", "partition_id"), edges_df.src == final_nodes_df.id, "inner") \
+        #                             .select("global_edge_id", "partition_id")
+
+        # --- DETAILED EDGE DIAGNOSTICS ---
+        # Use a LEFT join to find edges whose source nodes are missing from the final node list
+        edge_join_df = edges_df.join(
+            final_nodes_df.select("id", "partition_id"),
+            edges_df.src == final_nodes_df.id,
+            "left"  # Use a LEFT join for diagnostics
+        )
+
+        # Count how many edges failed to find a source node partition
+        missing_src_nodes_count = edge_join_df.where(F.col("partition_id").isNull()).count()
+        print(f"CRITICAL: Found {missing_src_nodes_count} edges whose source node was not in the final node list.")
+
+        # This is the original failing line
+        edge_map_for_save = edges_df.join(
+            final_nodes_df.select("id", "partition_id"),
+            edges_df.src == final_nodes_df.id,
+            "inner"
+        ).select("global_edge_id", "partition_id")
+        print(f"DEBUG: Count of edge_map_for_save: {edge_map_for_save.count()}")
+
+        # Add an assertion to fail fast
+        if node_map_for_save.count() == 0 or edge_map_for_save.count() == 0:
+            raise ValueError("One or both of the map DataFrames are empty. Halting before write.")
 
         # Execute the parallel saving operations
         save_maps_in_parallel(node_map_for_save, edge_map_for_save, temp_map_path)
-        save_partitioned_data(spark, final_nodes_df, edges_df, total_num_nodes, CONFIG)
+        save_partitions_for_pyg(spark, final_nodes_df, edges_df, total_num_nodes, CONFIG)
 
         edges_df.unpersist()
         final_nodes_df.unpersist()
