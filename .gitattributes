@@ -1,0 +1,2 @@
+hadoop-2.7.4.tar.gz filter=lfs diff=lfs merge=lfs -text
+hadoop-2.7.4-src.tar.gz filter=lfs diff=lfs merge=lfs -text

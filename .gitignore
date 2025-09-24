@@ -4,3 +4,5 @@ data/
 logs/
 spark/data/
 spark/apps/*.jar
+*.jar
+*.gz
