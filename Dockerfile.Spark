@@ -46,7 +46,8 @@ RUN python3.7 -m pip install --upgrade pip && \
     "numpy==1.19.5" \
     "torch==1.12.1" \
     "pyarrow==0.14.1" \
-    "hdfs==2.7.3"
+    "hdfs==2.7.3" \
+    "cassandra-driver"
 
 # Set graphframes version and PYTHONPATH
 ARG GF_VERSION="0.8.1-spark2.4-s_2.11"

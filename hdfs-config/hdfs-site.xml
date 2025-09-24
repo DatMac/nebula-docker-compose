@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License. See accompanying LICENSE file.
+-->
+
+<!-- hdfs-site.xml for HDFS client -->
+<configuration>
+    <property>
+        <name>dfs.replication</name>
+        <value>1</value>
+        <description>
+            Default block replication. The actual number of replications can be
+            specified when the file is created. For our single DataNode setup,
+            a replication factor of 1 is appropriate.
+        </description>
+    </property>
+
+    <!--
+    <property>
+        <name>dfs.client.use.datanode.hostname</name>
+        <value>true</value>
+        <description>
+            Whether clients should use datanode hostnames when connecting to datanodes.
+            Set to true if your client can resolve datanode hostnames (e.g., 'datanode' in Docker network).
+            Set to false if datanodes report their IP addresses and clients need to connect directly to IPs.
+            In most Docker setups, 'true' or omitting this property (which often defaults to true) works.
+        </description>
+    </property>
+    -->
+</configuration>
