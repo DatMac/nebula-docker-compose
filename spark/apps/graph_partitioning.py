@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # All configurable parameters are centralized here for easy management.
 CONFIG = {
     "app_name": "GNN_Data_Prep_Pipeline",
-    "partitions": 100,  # Number of partitions for the graph (N)
+    "partitions": 8,  # Number of partitions for the graph (N)
 
     "spark_master_url": "spark://spark-master:7077",
 
@@ -236,8 +236,8 @@ def save_maps_in_parallel(node_id_map: DataFrame, edge_map_df: DataFrame, temp_p
     logger.info(f"Saving node and edge maps in parallel to temporary location: {temp_path}")
     
     # Spark will write multiple part-files in each directory, which is scalable.
-    node_id_map.write.mode("overwrite").parquet(os.path.join(temp_path, "node_map_parts"))
-    edge_map_df.write.mode("overwrite").parquet(os.path.join(temp_path, "edge_map_parts"))
+    node_id_map.write.mode("overwrite").csv(os.path.join(temp_path, "node_map_parts"))
+    edge_map_df.write.mode("overwrite").csv(os.path.join(temp_path, "edge_map_parts"))
 
 
 def assemble_maps_from_parts(spark: SparkSession, temp_path: str, output_path: str,
@@ -257,14 +257,14 @@ def assemble_maps_from_parts(spark: SparkSession, temp_path: str, output_path: s
     logger.info("Assembling final map files from parallel parts...")
     
     # --- Assemble Node Map ---
-    node_map_parts_df = spark.read.parquet(os.path.join(temp_path, "node_map_parts"))
+    node_map_parts_df = spark.read.csv(os.path.join(temp_path, "node_map_parts"), schema="global_node_id LONG, partition_id INT")
     node_map_pd = node_map_parts_df.toPandas()
     
     node_map_tensor = torch.full((total_num_nodes,), -1, dtype=torch.long)
     node_map_tensor[node_map_pd['global_node_id'].values] = torch.tensor(node_map_pd['partition_id'].values, dtype=torch.long)
 
     # --- Assemble Edge Map ---
-    edge_map_parts_df = spark.read.parquet(os.path.join(temp_path, "edge_map_parts"))
+    edge_map_parts_df = spark.read.csv(os.path.join(temp_path, "edge_map_parts"), schema="global_edge_id LONG, partition_id INT")
     edge_map_pd = edge_map_parts_df.toPandas()
 
     edge_map_tensor = torch.full((total_num_edges,), -1, dtype=torch.long)
