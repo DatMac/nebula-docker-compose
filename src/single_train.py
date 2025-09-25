@@ -6,6 +6,7 @@ from collections import defaultdict
 # PyTorch Distributed
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
+from torch.distributed.rpc import TensorPipeRpcBackendOptions
 from torch.nn.parallel import DistributedDataParallel
 
 # PyTorch Geometric
@@ -31,52 +32,51 @@ def run():
     Main function to initialize and run the distributed training process.
     """
     # 1. Initialization
-    #os.environ['RANK'] = os.environ.get('WORKER_RANK', '0')
-    #os.environ['WORLD_SIZE'] = os.environ.get('NUM_WORKERS', '1')
-    os.environ['MASTER_ADDR'] = os.environ.get('MASTER_ADDR', '127.0.0.1')
-    os.environ['MASTER_PORT'] = os.environ.get('MASTER_PORT', '12355')
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+
+    print(f"--- [Rank {rank}/{world_size}] SCRIPT STARTED ---")
 
     master_addr = os.environ.get('MASTER_ADDR', '127.0.0.1')
     master_port = os.environ.get('MASTER_PORT', '12355')
 
-    dist.init_process_group("gloo")
+    ddp_port = int(master_port)
+    rpc_port = int(master_port) + 1  
+
+    # --- 1. Initialize DDP for gradient synchronization ---
+    ddp_init_method = f'tcp://{master_addr}:{ddp_port}'
+    print(f"--- [Rank {rank}] Initializing DDP Process Group... -> {ddp_init_method} ---")
+    dist.init_process_group(
+        backend="gloo",
+        init_method=ddp_init_method,
+        rank=rank,
+        world_size=world_size
+    )
+    print(f"--- [Rank {dist.get_rank()}] DDP Process Group INITIALIZED! ---")
 
     current_ctx = DistContext(
-        rank=dist.get_rank(),
-        global_rank=dist.get_rank(),
-        world_size=dist.get_world_size(),
-        global_world_size=dist.get_world_size(),
+        rank=rank,
+        global_rank=rank,
+        world_size=world_size,
+        global_world_size=world_size,
         group_name='pyg-dist-training'
     )
-
-    rank = dist.get_rank()
-    world_size = dist.get_world_size()
-    device = torch.device('cpu')
     
+    device = torch.device('cpu')
+
     if rank == 0:
-        print("--- Distributed Training Environment Initialized ---")
+        print("\n--- Distributed Training Environment Ready ---")
         print(f"World Size: {world_size}")
-        print("--------------------------------------------------")
-
-    rpc_port = int(master_port) + 1
-
-    rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
-    rpc_backend_options.init_method = f"tcp://{master_addr}:{rpc_port}"
-
-    print(f"--- [Rank {rank}] Attempting to initialize RPC... ---")
-    rpc.init_rpc(
-        name=f"worker{rank}",
-        rank=rank,
-        world_size=world_size,
-        rpc_backend_options=rpc_backend_options,
-    )
-    print(f"--- [Rank {rank}] RPC INITIALIZED ---")
+        print("--------------------------------------------\n")
 
     # 2. Data Loading
     data_path = os.environ.get('LOCAL_DATA_PATH', '/pyg_dataset')
 
     if rank == 0:
         print(f"Loading partition data for all ranks from base path: {data_path}")
+
+    global_labels_path = os.path.join(data_path, 'labels.pt')
+    global_labels = torch.load(global_labels_path, map_location='cpu')
 
     graph_store = LocalGraphStore.from_partition(data_path, pid=rank)
     feature_store = LocalFeatureStore.from_partition(data_path, pid=rank)
@@ -92,15 +92,14 @@ def run():
     test_mask = feature_store.get_tensor(group_name=None, attr_name='test_mask')
     test_idx = feature_store.get_global_id(group_name=None)[test_mask]
     
-    if rank == 0:
-        print("--- Data Loaded ---")
-        print(f"Rank {rank} has {len(train_idx)} training nodes, {len(val_idx)} validation nodes, and {len(test_idx)} test nodes.")
-        print("-------------------")
+    print("--- Data Loaded ---")
+    print(f"Rank {rank} has {len(train_idx)} training nodes, {len(val_idx)} validation nodes, and {len(test_idx)} test nodes.")
+    print("-------------------")
 
     # 3. GNN Model
-    num_features = feature_store.get_tensor_size(group_name=None, attr_name='x')[0]
-    num_classes = int(feature_store.get_tensor(group_name=None, attr_name='y').max()) + 1
-    
+    num_features = feature_store.get_tensor_size(group_name=None, attr_name='x')[1]
+    num_classes = int(global_labels.max()) + 1
+
     model = GNN(
         in_channels=num_features,
         hidden_channels=128,
@@ -118,9 +117,10 @@ def run():
         current_ctx=current_ctx,
         master_addr=master_addr, 
         master_port=master_port,
+        filter_per_worker=True,
+        drop_last=True,
     )
     
-    # --- ADDED: Validation Loader ---
     val_loader = DistNeighborLoader(
         data=data,
         input_nodes=val_idx,
@@ -130,9 +130,10 @@ def run():
         current_ctx=current_ctx,
         master_addr=master_addr, 
         master_port=master_port,   
+        filter_per_worker=True,
+        drop_last=True,
     ) 
 
-    # --- ADDED: Test Loader ---
     test_loader = DistNeighborLoader(
         data=data,
         input_nodes=test_idx,
@@ -141,7 +142,9 @@ def run():
         shuffle=False,
         current_ctx=current_ctx,
         master_addr=master_addr,
-        master_port=master_port,  
+        master_port=master_port,
+        filter_per_worker=True,
+        drop_last=True,
     )
     
     if rank == 0:
@@ -151,7 +154,6 @@ def run():
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     
     for epoch in range(1, 11):
-        # --- Training Step ---
         model.train()
         total_loss = 0
         total_train_nodes = 0
@@ -159,12 +161,27 @@ def run():
         for i, batch in enumerate(train_loader):
             optimizer.zero_grad()
             out = model(batch.x, batch.edge_index)
-            loss = F.cross_entropy(out, batch.y)
+            
+            # ========================== THE FIX: Part 2 ==========================
+            # 1. Get the global IDs of the seed nodes for this batch.
+            seed_node_global_ids = batch.n_id[:batch.batch_size]
+
+            # 2. Use these IDs to look up the labels from our complete global_labels tensor.
+            target_labels = global_labels[seed_node_global_ids]
+
+            # 3. Get the model's predictions for only the seed nodes.
+            out_for_loss = out[:batch.batch_size]
+            
+            # 4. Compute the loss.
+            loss = F.cross_entropy(out_for_loss, target_labels)
+            # ======================= END OF FIX: Part 2 ========================
+
             loss.backward()
             optimizer.step()
-            total_loss += loss.item() * batch.num_nodes
-            total_train_nodes += batch.num_nodes
-        
+            
+            total_loss += loss.item() * batch.batch_size
+            total_train_nodes += batch.batch_size
+
         # Aggregate training loss from all ranks
         total_loss_tensor = torch.tensor(total_loss, device=device)
         total_train_nodes_tensor = torch.tensor(total_train_nodes, device=device)
@@ -178,7 +195,6 @@ def run():
         
         dist.barrier()
 
-        # --- ADDED: Validation Step ---
         model.eval()
         total_val_loss = 0
         total_correct = 0
@@ -226,7 +242,6 @@ def run():
     print(f"--- Rank {rank} finished training ---")
     dist.barrier()
 
-    # --- ADDED: Final Test Evaluation ---
     if rank == 0:
         print("--- Starting Final Test Evaluation ---")
         
@@ -258,8 +273,11 @@ def run():
 
     print(f"--- [Rank {rank}] Shutting down RPC... ---")
     rpc.shutdown()
-
+    
+    print(f"--- [Rank {rank}] Destroying DDP process group... ---")
     dist.destroy_process_group()
+    
+    print(f"--- [Rank {rank}] SCRIPT FINISHED ---")
 
 if __name__ == "__main__":
     run()

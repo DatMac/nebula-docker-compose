@@ -444,11 +444,11 @@ def generate_and_save_maps_on_driver(final_nodes_df: DataFrame, edges_df: DataFr
     logger.info("Successfully assembled and saved final map files to HDFS.")
 
 
-def save_partitioned_data(spark: SparkSession, enriched_nodes_df: DataFrame, edges_df: DataFrame, total_num_nodes: int, config: Dict[str, Any]):
+def save_partitioned_data_1(spark: SparkSession, enriched_nodes_df: DataFrame, edges_df: DataFrame, total_num_nodes: int, config: Dict[str, Any]):
     """Saves the partitioned graph data (node features, graph structure) in a distributed manner."""
     logger.info("Starting distributed save of partition data (graph, features, etc.)...")
     output_path = config["output_path"]
-    meta = {'num_parts': config["partitions"], 'is_hetero': False, 'node_types': None, 'edge_types': None}
+    meta = {'is_sorted': False, 'num_parts': config["partitions"], 'is_hetero': False, 'node_types': None, 'edge_types': None}
     with tempfile.TemporaryDirectory() as tmpdir:
         meta_path = os.path.join(tmpdir, "META.json")
         with open(meta_path, 'w') as f: json.dump(meta, f)
@@ -547,6 +547,133 @@ def save_partitioned_data(spark: SparkSession, enriched_nodes_df: DataFrame, edg
     failed_partitions = result.where(F.col("success") == False).count()
     if failed_partitions > 0: logger.error(f"{failed_partitions} partitions failed to save. Check executor logs.")
     else: logger.info("All partitions processed and saved successfully.")
+
+def save_partitioned_data(spark: SparkSession, enriched_nodes_df: DataFrame, edges_df: DataFrame, total_num_nodes: int, config: Dict[str, Any]):
+    """
+    Saves the partitioned graph data. Node features and graph structure are saved in a distributed manner,
+    while the global labels tensor is created on the driver and saved separately.
+    """
+    logger.info("Starting distributed save of partition data (graph, features, etc.)...")
+    output_path = config["output_path"]
+
+    # --- Save META.json from Driver ---
+    meta = {'is_sorted': False, 'num_parts': config["partitions"], 'is_hetero': False, 'node_types': None, 'edge_types': None}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        meta_path = os.path.join(tmpdir, "META.json")
+        with open(meta_path, 'w') as f:
+            json.dump(meta, f)
+        _write_to_hdfs_from_driver(meta_path, f"{output_path}/META.json", config)
+
+    # --- New: Assemble and Save Global labels.pt from Driver ---
+    logger.info("Assembling and saving global labels tensor on the driver...")
+    try:
+        # Collect all labels, ensuring they are ordered by the final global node ID for correct indexing
+        labels_pd = enriched_nodes_df.select("global_node_id", "label") \
+                                     .orderBy("global_node_id") \
+                                     .toPandas()
+
+        labels_tensor = torch.from_numpy(labels_pd['label'].to_numpy(dtype=np.int64))
+
+        # Save to HDFS via a temporary local file
+        with tempfile.TemporaryDirectory() as tmpdir:
+            labels_path = os.path.join(tmpdir, "labels.pt")
+            torch.save(labels_tensor, labels_path)
+            _write_to_hdfs_from_driver(labels_path, f"{output_path}/labels.pt", config)
+        
+        logger.info(f"Successfully saved labels.pt for {len(labels_pd)} nodes to HDFS.")
+    except Exception as e:
+        logger.error(f"Failed to create and save labels.pt on the driver. Error: {e}")
+        raise e
+
+
+    # --- Prepare DataFrames for Distributed Processing ---
+    intra_partition_edges = (
+        edges_df.join(enriched_nodes_df.alias("src_map"), F.col("src_global") == F.col("src_map.global_node_id"))
+        .join(enriched_nodes_df.alias("dst_map"), F.col("dst_global") == F.col("dst_map.global_node_id"))
+        .where(F.col("src_map.partition_id") == F.col("dst_map.partition_id"))
+        .select(F.col("src_map.partition_id").alias("partition_id"), "src_global", "dst_global", "global_edge_id")
+    )
+    # Note: We still need the 'label' column here to pass it to the UDF, even if it's not saved in node_feats.pt
+    nodes_for_grouping = enriched_nodes_df.select("partition_id", F.lit("node").alias("type"), "global_node_id", "features", "label", "train_mask", "val_mask", "test_mask", F.lit(None).cast(LongType()).alias("src_global"), F.lit(None).cast(LongType()).alias("dst_global"), F.lit(None).cast(LongType()).alias("global_edge_id"))
+    edges_for_grouping = intra_partition_edges.select("partition_id", F.lit("edge").alias("type"), F.lit(None).alias("global_node_id"), F.lit(None).cast(ArrayType(FloatType())).alias("features"), F.lit(None).cast(IntegerType()).alias("label"), F.lit(None).cast(BooleanType()).alias("train_mask"), F.lit(None).cast(BooleanType()).alias("val_mask"), F.lit(None).cast(BooleanType()).alias("test_mask"), "src_global", "dst_global", "global_edge_id")
+    grouped_data = nodes_for_grouping.unionByName(edges_for_grouping)
+    
+    # --- Broadcast variables for UDF ---
+    b_total_num_nodes = spark.sparkContext.broadcast(total_num_nodes)
+    namenode_host = config["hdfs_base_uri"].split('//')[1].split(':')[0]
+    b_webhdfs_url = spark.sparkContext.broadcast(f"http://{namenode_host}:50070")
+    b_output_path = spark.sparkContext.broadcast(output_path)
+    b_hdfs_user = spark.sparkContext.broadcast(config.get("hdfs_user", "root"))
+    result_schema = StructType([StructField("partition_id", IntegerType()), StructField("success", BooleanType())])
+
+    # --- Pandas UDF for Distributed Saving ---
+    @pandas_udf(result_schema, PandasUDFType.GROUPED_MAP)
+    def process_and_save_partition_fn(pdf: pd.DataFrame) -> pd.DataFrame:
+        if pdf.empty: return pd.DataFrame({'partition_id': [], 'success': []})
+        partition_id = int(pdf['partition_id'].iloc[0])
+        success = False
+        try:
+            client = InsecureClient(b_webhdfs_url.value, user=b_hdfs_user.value)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                nodes_pd = pdf[pdf['type'] == 'node'].sort_values('global_node_id').reset_index()
+
+                expected_feature_dim = 600
+                processed_features = []
+                for features_list_or_none in nodes_pd['features']:
+                    if features_list_or_none is None:
+                        processed_features.append(np.zeros(expected_feature_dim, dtype=np.float32))
+                    elif not isinstance(features_list_or_none, list):
+                        print(f"WARNING (Partition {partition_id}): Node with unexpected feature type ({type(features_list_or_none)}). Replacing with zero vector.")
+                        processed_features.append(np.zeros(expected_feature_dim, dtype=np.float32))
+                    else:
+                        feature_vec = np.array(features_list_or_none, dtype=np.float32)
+                        if feature_vec.size < expected_feature_dim:
+                            padded_vec = np.pad(feature_vec, (0, expected_feature_dim - feature_vec.size), 'constant')
+                            processed_features.append(padded_vec)
+                        elif feature_vec.size > expected_feature_dim:
+                            truncated_vec = feature_vec[:expected_feature_dim]
+                            processed_features.append(truncated_vec)
+                        else:
+                            processed_features.append(feature_vec)
+
+                feature_array = np.vstack(processed_features) if processed_features else np.empty((0, expected_feature_dim), dtype=np.float32)
+
+                # --- Modified: 'y' tensor is removed from this dictionary ---
+                feats_dict = {
+                    'x': torch.from_numpy(feature_array),
+                    'train_mask': torch.from_numpy(nodes_pd['train_mask'].to_numpy(dtype=np.bool_)),
+                    'val_mask': torch.from_numpy(nodes_pd['val_mask'].to_numpy(dtype=np.bool_)),
+                    'test_mask': torch.from_numpy(nodes_pd['test_mask'].to_numpy(dtype=np.bool_))
+                }
+                node_feats = {'global_id': torch.tensor(nodes_pd['global_node_id'].values, dtype=torch.long), 'feats': feats_dict}
+                node_feats_path = os.path.join(tmpdir, "node_feats.pt")
+                torch.save(node_feats, node_feats_path)
+                
+                edges_pd = pdf[pdf['type'] == 'edge']
+                graph = {'row': torch.tensor(edges_pd['src_global'].values, dtype=torch.long), 'col': torch.tensor(edges_pd['dst_global'].values, dtype=torch.long), 'edge_id': torch.tensor(edges_pd['global_edge_id'].values, dtype=torch.long), 'size': (b_total_num_nodes.value, b_total_num_nodes.value)} if not edges_pd.empty else {'row': torch.empty(0, dtype=torch.long), 'col': torch.empty(0, dtype=torch.long), 'edge_id': torch.empty(0, dtype=torch.long), 'size': (b_total_num_nodes.value, b_total_num_nodes.value)}
+                graph_path, edge_feats_path = os.path.join(tmpdir, "graph.pt"), os.path.join(tmpdir, "edge_feats.pt")
+                torch.save(graph, graph_path); torch.save(defaultdict(), edge_feats_path)
+                
+                hdfs_partition_dir = f"{b_output_path.value}/part_{partition_id}"
+                client.upload(f"{hdfs_partition_dir}/node_feats.pt", node_feats_path, overwrite=True)
+                client.upload(f"{hdfs_partition_dir}/graph.pt", graph_path, overwrite=True)
+                client.upload(f"{hdfs_partition_dir}/edge_feats.pt", edge_feats_path, overwrite=True)
+            success = True
+        except Exception as e:
+            print(f"--- START: FULL STACK TRACE FOR ERROR IN PARTITION {partition_id} ---")
+            print(f"ERROR processing partition {partition_id}: {e}")
+            traceback.print_exc()
+            print(f"--- END: FULL STACK TRACE FOR ERROR IN PARTITION {partition_id} ---")
+            success = False
+        return pd.DataFrame([{'partition_id': partition_id, 'success': success}])
+
+    # --- Execute and Verify ---
+    result = grouped_data.groupBy("partition_id").apply(process_and_save_partition_fn)
+    failed_partitions = result.where(F.col("success") == False).count()
+    if failed_partitions > 0:
+        logger.error(f"{failed_partitions} partitions failed to save. Check executor logs.")
+    else:
+        logger.info("All partitions processed and saved successfully.")
 
 def main_1():
     """Main execution function with direct-to-driver map generation."""

@@ -43,8 +43,10 @@ RUN pip install --no-cache-dir \
     torch_sparse \
     torch_cluster \
     torch_spline_conv \
+    torch_geometric \
     -f https://data.pyg.org/whl/torch-2.4.0+cpu.html
-RUN pip install --no-cache-dir torch_geometric
+
+RUN pip install --no-cache-dir pyg-lib -f https://data.pyg.org/whl/torch-2.4.0+cpu.html
 
 # 8. Project Files & Entrypoint (Unchanged)
 WORKDIR /app

@@ -9,7 +9,7 @@ export CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob)
 # 2. Robust Rank Assignment using HDFS as a Coordinator
 # Workers will race to create a directory for each rank. The winner gets the rank.
 COORD_PATH="${HDFS_COORD_PATH:-/job-coordination}" # A shared directory on HDFS
-NUM_WORKERS=${NUM_WORKERS:-1} # Total number of workers
+export NUM_WORKERS=${NUM_WORKERS:-1} # Total number of workers
 MAX_WORKERS=$((NUM_WORKERS - 1))
 ASSIGNED_RANK=-1
 
@@ -55,6 +55,12 @@ if [ -n "$HDFS_DATA_PATH" ]; then
   hdfs dfs -get "${HDFS_DATA_PATH}/META.json" "${LOCAL_DATA_PATH}/"
   hdfs dfs -get "${HDFS_DATA_PATH}/node_map.pt" "${LOCAL_DATA_PATH}/"
   hdfs dfs -get "${HDFS_DATA_PATH}/edge_map.pt" "${LOCAL_DATA_PATH}/"
+  hdfs dfs -get "${HDFS_DATA_PATH}/labels.pt" "${LOCAL_DATA_PATH}/"
+
+  mkdir -p "${LOCAL_DATA_PATH}/part_1/"
+  mkdir -p "${LOCAL_DATA_PATH}/part_2/"
+  hdfs dfs -get "${HDFS_DATA_PATH}/part_1/*" "${LOCAL_DATA_PATH}/part_1"
+  hdfs dfs -get "${HDFS_DATA_PATH}/part_2/*" "${LOCAL_DATA_PATH}/part_2"
 
   echo "Copying data for rank ${WORKER_RANK} from '${HDFS_PARTITION_PATH}' to '${LOCAL_PARTITION_PATH}'..."
   if hdfs dfs -test -e "$HDFS_PARTITION_PATH"; then
@@ -68,6 +74,7 @@ else
   echo "HDFS_DATA_PATH not set, skipping data copy."
 fi
 
+export WORKER_RANK
 
 # 6. Execute the main command passed to the container
 echo "Executing main command: $@"
