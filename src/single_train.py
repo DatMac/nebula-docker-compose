@@ -41,7 +41,9 @@ def run():
     master_port = os.environ.get('MASTER_PORT', '12355')
 
     ddp_port = int(master_port)
-    rpc_port = int(master_port) + 1  
+    train_loader_port = int(master_port)
+    val_loader_port = int(master_port)
+    test_loader_port = int(master_port)
 
     # --- 1. Initialize DDP for gradient synchronization ---
     ddp_init_method = f'tcp://{master_addr}:{ddp_port}'
@@ -76,10 +78,10 @@ def run():
         print(f"Loading partition data for all ranks from base path: {data_path}")
 
     global_labels_path = os.path.join(data_path, 'labels.pt')
-    global_labels = torch.load(global_labels_path, map_location='cpu')
 
     graph_store = LocalGraphStore.from_partition(data_path, pid=rank)
     feature_store = LocalFeatureStore.from_partition(data_path, pid=rank)
+    feature_store.labels = torch.load(global_labels_path, map_location='cpu')
     data = (feature_store, graph_store)
 
     # Get global indices for training, validation, and test sets for this partition
@@ -98,14 +100,14 @@ def run():
 
     # 3. GNN Model
     num_features = feature_store.get_tensor_size(group_name=None, attr_name='x')[1]
-    num_classes = int(global_labels.max()) + 1
+    num_classes = int(feature_store.labels.max()) + 1
 
     model = GNN(
         in_channels=num_features,
         hidden_channels=128,
         out_channels=num_classes,
     )
-    model = DistributedDataParallel(model)
+    model = DistributedDataParallel(model, find_unused_parameters=True)
 
     # 4. Distributed Data Loaders
     train_loader = DistNeighborLoader(
@@ -116,35 +118,8 @@ def run():
         shuffle=True,
         current_ctx=current_ctx,
         master_addr=master_addr, 
-        master_port=master_port,
+        master_port=train_loader_port,
         filter_per_worker=True,
-        drop_last=True,
-    )
-    
-    val_loader = DistNeighborLoader(
-        data=data,
-        input_nodes=val_idx,
-        batch_size=128,
-        num_neighbors=[10, 5],
-        shuffle=False,
-        current_ctx=current_ctx,
-        master_addr=master_addr, 
-        master_port=master_port,   
-        filter_per_worker=True,
-        drop_last=True,
-    ) 
-
-    test_loader = DistNeighborLoader(
-        data=data,
-        input_nodes=test_idx,
-        batch_size=128,
-        num_neighbors=[10, 5],
-        shuffle=False,
-        current_ctx=current_ctx,
-        master_addr=master_addr,
-        master_port=master_port,
-        filter_per_worker=True,
-        drop_last=True,
     )
     
     if rank == 0:
@@ -163,16 +138,15 @@ def run():
             out = model(batch.x, batch.edge_index)
             
             # ========================== THE FIX: Part 2 ==========================
-            # 1. Get the global IDs of the seed nodes for this batch.
-            seed_node_global_ids = batch.n_id[:batch.batch_size]
-
-            # 2. Use these IDs to look up the labels from our complete global_labels tensor.
-            target_labels = global_labels[seed_node_global_ids]
-
-            # 3. Get the model's predictions for only the seed nodes.
+            # 1. Get the model's predictions for only the seed nodes.
             out_for_loss = out[:batch.batch_size]
-            
-            # 4. Compute the loss.
+
+            # 2. Get the corresponding labels directly from the batch object.
+            # The loader has already fetched the correct labels for you.
+            # Note: The loader might not slice .y, so we slice it to be safe.
+            target_labels = batch.y[:batch.batch_size]
+        
+           # 3. Compute the loss.
             loss = F.cross_entropy(out_for_loss, target_labels)
             # ======================= END OF FIX: Part 2 ========================
 
@@ -181,6 +155,8 @@ def run():
             
             total_loss += loss.item() * batch.batch_size
             total_train_nodes += batch.batch_size
+
+        dist.barrier()
 
         # Aggregate training loss from all ranks
         total_loss_tensor = torch.tensor(total_loss, device=device)
@@ -195,85 +171,6 @@ def run():
         
         dist.barrier()
 
-        model.eval()
-        total_val_loss = 0
-        total_correct = 0
-        total_val_nodes = 0
-        
-        with torch.no_grad():
-            for batch in val_loader:
-                out = model(batch.x, batch.edge_index)
-                loss = F.cross_entropy(out, batch.y)
-                
-                pred = out.argmax(dim=1)
-                correct = (pred == batch.y).sum()
-                
-                total_val_loss += loss.item() * batch.num_nodes
-                total_correct += correct.item()
-                total_val_nodes += batch.num_nodes
-
-        # Aggregate validation metrics from all ranks
-        total_val_loss_tensor = torch.tensor(total_val_loss, device=device)
-        total_correct_tensor = torch.tensor(total_correct, device=device)
-        total_val_nodes_tensor = torch.tensor(total_val_nodes, device=device)
-        
-        dist.all_reduce(total_val_loss_tensor, op=dist.ReduceOp.SUM)
-        dist.all_reduce(total_correct_tensor, op=dist.ReduceOp.SUM)
-        dist.all_reduce(total_val_nodes_tensor, op=dist.ReduceOp.SUM)
-
-        # Calculate global validation metrics
-        global_val_loss = total_val_loss_tensor.item() / total_val_nodes_tensor.item()
-        global_val_acc = total_correct_tensor.item() / total_val_nodes_tensor.item()
-
-        if rank == 0:
-            print(f'Epoch: {epoch:03d}, Val Loss: {global_val_loss:.4f}, Val Acc: {global_val_acc:.4f}')
-
-        # Synchronize all processes at the end of the epoch
-        dist.barrier()
-
-        # 6. Model Checkpointing
-        if rank == 0 and epoch % 5 == 0:
-            checkpoint_dir = '/app/models'
-            os.makedirs(checkpoint_dir, exist_ok=True)
-            checkpoint_path = os.path.join(checkpoint_dir, f'model_epoch_{epoch}.pt')
-            torch.save(model.module.state_dict(), checkpoint_path)
-            print(f'--- Model checkpoint saved to {checkpoint_path} ---')
-
-    print(f"--- Rank {rank} finished training ---")
-    dist.barrier()
-
-    if rank == 0:
-        print("--- Starting Final Test Evaluation ---")
-        
-    model.eval()
-    total_test_correct = 0
-    total_test_nodes = 0
-    
-    with torch.no_grad():
-        for batch in test_loader:
-            out = model(batch.x, batch.edge_index)
-            pred = out.argmax(dim=1)
-            correct = (pred == batch.y).sum()
-            total_test_correct += correct.item()
-            total_test_nodes += batch.num_nodes
-
-    # Aggregate test metrics
-    total_test_correct_tensor = torch.tensor(total_test_correct, device=device)
-    total_test_nodes_tensor = torch.tensor(total_test_nodes, device=device)
-
-    dist.all_reduce(total_test_correct_tensor, op=dist.ReduceOp.SUM)
-    dist.all_reduce(total_test_nodes_tensor, op=dist.ReduceOp.SUM)
-    
-    # Calculate global test accuracy
-    global_test_acc = total_test_correct_tensor.item() / total_test_nodes_tensor.item()
-
-    if rank == 0:
-        print(f'Final Test Accuracy: {global_test_acc:.4f}')
-        print("--------------------------------------")
-
-    print(f"--- [Rank {rank}] Shutting down RPC... ---")
-    rpc.shutdown()
-    
     print(f"--- [Rank {rank}] Destroying DDP process group... ---")
     dist.destroy_process_group()
     
