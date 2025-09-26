@@ -1,5 +1,3 @@
-# /app/dist_train.py
-
 import argparse
 import json
 import os
@@ -172,6 +170,7 @@ def train(
 
 
 def run_proc(
+    local_proc_rank: int,
     node_rank: int,
     num_nodes: int,
     dataset_root_dir: str,
@@ -240,14 +239,10 @@ def run_proc(
     print('--- Initialize DDP training group ...')
     torch.distributed.init_process_group(
         backend='gloo',
-        #rank=node_rank,
-        #world_size=num_nodes,
-        #init_method=f'tcp://{master_addr}:{ddp_port}',
+        rank=current_ctx.rank,
+        world_size=current_ctx.world_size,
+        init_method=f'tcp://{master_addr}:{ddp_port}',
     )
-    
-    master_addr = os.environ.get('MASTER_ADDR')
-    master_port = int(os.environ.get('MASTER_PORT'))
-    print(f"Master port is: {master_port}")
 
     print('--- Initialize distributed loaders ...')
     num_neighbors = [int(i) for i in num_neighbors.split(',')]
@@ -264,8 +259,7 @@ def run_proc(
         batch_size=batch_size,
         num_workers=num_workers,
         master_addr=master_addr,
-        #master_port=train_loader_port,
-        master_port=master_port,
+        master_port=train_loader_port,
         concurrency=concurrency,
         async_sampling=async_sampling,
     )
@@ -282,8 +276,7 @@ def run_proc(
         batch_size=batch_size,
         num_workers=num_workers,
         master_addr=master_addr,
-        #master_port=test_loader_port,
-        master_port=master_port + 1,
+        master_port=test_loader_port,
         concurrency=concurrency,
         async_sampling=async_sampling,
     )
@@ -373,7 +366,6 @@ def run_proc(
     print(f'--- [Node {current_ctx.rank}] Closing ---')
     torch.distributed.destroy_process_group()
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Arguments for distributed training')
@@ -455,26 +447,13 @@ if __name__ == '__main__':
         help='Directory to save the trained model checkpoints',
     )
     parser.add_argument('--progress_bar', action='store_true')
-    
-    parser.add_argument(
-        '--node_rank_arg',
-        type=int,
-        default=0,
-        help='The rank of this node, passed from the entrypoint.',
-    )
-    parser.add_argument(
-        '--num_nodes_arg',
-        type=int,
-        default=1,
-        help='The total number of nodes, passed from the entrypoint.',
-    )
 
     args = parser.parse_args()
 
     # Get distributed configuration from environment variables
     master_addr = os.environ.get('MASTER_ADDR', 'localhost')
-    node_rank = args.node_rank_arg
-    num_nodes = args.num_nodes_arg
+    node_rank = int(os.environ.get('RANK', '0'))
+    num_nodes = int(os.environ.get('WORLD_SIZE', '1'))
 
     print('--- Distributed training on custom dataset ---')
     print(f'* total nodes: {num_nodes}')
@@ -492,25 +471,30 @@ if __name__ == '__main__':
         logfile = None
 
     print('--- Launching training process ...')
-    # No torch.multiprocessing.spawn, just call the function directly
-    run_proc(
-        node_rank=node_rank,
-        num_nodes=num_nodes,
-        dataset_root_dir=args.dataset_root_dir,
-        master_addr=master_addr,
-        ddp_port=args.ddp_port,
-        train_loader_port=args.train_loader_port,
-        test_loader_port=args.test_loader_port,
-        num_epochs=args.num_epochs,
-        batch_size=args.batch_size,
-        num_neighbors=args.num_neighbors,
-        async_sampling=args.async_sampling,
-        concurrency=args.concurrency,
-        num_workers=args.num_workers,
-        num_loader_threads=args.num_loader_threads,
-        progress_bar=args.progress_bar,
-        logfile=logfile,
-        model_save_path=args.model_save_path,
+    
+    torch.multiprocessing.spawn(
+        run_proc,
+        args=(
+            node_rank,
+            num_nodes,
+            args.dataset_root_dir,
+            master_addr,
+            args.ddp_port,
+            args.train_loader_port,
+            args.test_loader_port,
+            args.num_epochs,
+            args.batch_size,
+            args.num_neighbors,
+            args.async_sampling,
+            args.concurrency,
+            args.num_workers,
+            args.num_loader_threads,
+            args.progress_bar,
+            logfile,
+            args.model_save_path
+        ),
+        join=True,
     )
+
     print('--- Finished training process ---')
     # ========================================================================

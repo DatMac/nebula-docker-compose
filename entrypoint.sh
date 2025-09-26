@@ -107,20 +107,32 @@ else
   echo "HDFS_DATA_PATH not set, skipping data copy."
 fi
 
+# ==================== NEW: DISTRIBUTED BARRIER ================================
+# All nodes must wait here until everyone has finished data copying.
+
+BARRIER_PATH="${COORD_PATH}/barrier"
+hdfs dfs -mkdir -p "$BARRIER_PATH"
+
+echo "[Rank ${RANK}] Finished setup. Signaling readiness and entering barrier..."
+# Create a zero-byte file to signal this rank is ready.
+hdfs dfs -touchz "${BARRIER_PATH}/rank_${RANK}_ready"
+
+while true; do
+  # List files in the barrier directory and count them.
+  # The `|| true` prevents the script from exiting if the directory is empty on the first try.
+  READY_COUNT=$(hdfs dfs -ls "$BARRIER_PATH" | wc -l || true)
+  
+  echo "[Rank ${RANK}] Waiting at barrier... ${READY_COUNT} of ${NUM_WORKERS} workers are ready."
+  
+  if [ "$READY_COUNT" -ge "$NUM_WORKERS" ]; then
+    echo "[Rank ${RANK}] All workers are ready. Proceeding..."
+    break # Exit the loop
+  fi
+  
+  sleep 5 # Wait before checking again
+done
+# ==============================================================================
+
 # 6. Execute the main command passed to the container
-#echo "Executing main command: $@"
-#exec "$@"
-
-echo "[Rank ${RANK}] Launching training via torchrun..."
-
-# The python script arguments are passed from the docker-compose 'command' section as "$@"
-exec torchrun \
-  --nproc_per_node=1 \
-  --nnodes=$WORLD_SIZE \
-  --node_rank=$RANK \
-  --rdzv_backend=c10d \
-  --rdzv_endpoint=$MASTER_ADDR:29500 \
-  /app/distributed_training.py \
-    --node_rank_arg=$RANK \
-    --num_nodes_arg=$WORLD_SIZE \
-    "$@"
+echo "Executing main command: $@"
+exec "$@"
