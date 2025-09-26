@@ -108,5 +108,19 @@ else
 fi
 
 # 6. Execute the main command passed to the container
-echo "Executing main command: $@"
-exec "$@"
+#echo "Executing main command: $@"
+#exec "$@"
+
+echo "[Rank ${RANK}] Launching training via torchrun..."
+
+# The python script arguments are passed from the docker-compose 'command' section as "$@"
+exec torchrun \
+  --nproc_per_node=1 \
+  --nnodes=$WORLD_SIZE \
+  --node_rank=$RANK \
+  --rdzv_backend=c10d \
+  --rdzv_endpoint=$MASTER_ADDR:29500 \
+  /app/distributed_training.py \
+    --node_rank_arg=$RANK \
+    --num_nodes_arg=$WORLD_SIZE \
+    "$@"

@@ -83,7 +83,6 @@ services:
     networks:
       - pyg-net
     command: >
-      python /app/distributed_training.py
         --num_epochs=10
         --batch_size=512
         --num_workers=0
@@ -110,7 +109,6 @@ services:
     networks:
       - pyg-net
     command: >
-      python /app/distributed_training.py
         --num_epochs=10
         --batch_size=512
         --num_workers=0

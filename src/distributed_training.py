@@ -240,10 +240,14 @@ def run_proc(
     print('--- Initialize DDP training group ...')
     torch.distributed.init_process_group(
         backend='gloo',
-        rank=current_ctx.rank,
-        world_size=current_ctx.world_size,
-        init_method=f'tcp://{master_addr}:{ddp_port}',
+        #rank=node_rank,
+        #world_size=num_nodes,
+        #init_method=f'tcp://{master_addr}:{ddp_port}',
     )
+    
+    master_addr = os.environ.get('MASTER_ADDR')
+    master_port = int(os.environ.get('MASTER_PORT'))
+    print(f"Master port is: {master_port}")
 
     print('--- Initialize distributed loaders ...')
     num_neighbors = [int(i) for i in num_neighbors.split(',')]
@@ -260,7 +264,8 @@ def run_proc(
         batch_size=batch_size,
         num_workers=num_workers,
         master_addr=master_addr,
-        master_port=train_loader_port,
+        #master_port=train_loader_port,
+        master_port=master_port,
         concurrency=concurrency,
         async_sampling=async_sampling,
     )
@@ -277,7 +282,8 @@ def run_proc(
         batch_size=batch_size,
         num_workers=num_workers,
         master_addr=master_addr,
-        master_port=test_loader_port,
+        #master_port=test_loader_port,
+        master_port=master_port + 1,
         concurrency=concurrency,
         async_sampling=async_sampling,
     )
@@ -450,13 +456,26 @@ if __name__ == '__main__':
     )
     parser.add_argument('--progress_bar', action='store_true')
     
+    parser.add_argument(
+        '--node_rank_arg',
+        type=int,
+        default=0,
+        help='The rank of this node, passed from the entrypoint.',
+    )
+    parser.add_argument(
+        '--num_nodes_arg',
+        type=int,
+        default=1,
+        help='The total number of nodes, passed from the entrypoint.',
+    )
+
     args = parser.parse_args()
 
     # Get distributed configuration from environment variables
     master_addr = os.environ.get('MASTER_ADDR', 'localhost')
-    node_rank = int(os.environ.get('RANK', '0'))
-    num_nodes = int(os.environ.get('WORLD_SIZE', '1'))
-    
+    node_rank = args.node_rank_arg
+    num_nodes = args.num_nodes_arg
+
     print('--- Distributed training on custom dataset ---')
     print(f'* total nodes: {num_nodes}')
     print(f'* node rank: {node_rank}')
