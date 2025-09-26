@@ -188,6 +188,7 @@ def run_proc(
     num_loader_threads: int,
     progress_bar: bool,
     logfile: str,
+    model_save_path: str,
 ):
     # ==================== MODIFIED PART 1: Data Loading ====================
     print('--- Loading data partition files ...')
@@ -281,6 +282,12 @@ def run_proc(
         async_sampling=async_sampling,
     )
 
+    if node_rank == 0:
+        print("All loaders initialized. Synchronizing all nodes before training...")
+    torch.distributed.barrier()
+    if node_rank == 0:
+        print("Synchronization complete. Starting training.")
+
     # ================== MODIFIED PART 2: Model Configuration ==================
     print('--- Initialize model ...')
     
@@ -341,6 +348,22 @@ def run_proc(
                 num_loader_threads,
                 progress_bar,
             )
+
+        if epoch % 10 == 0 or epoch == num_epochs:
+            # Ensure all processes are synchronized before saving.
+            torch.distributed.barrier()
+            
+            # Only the main process (rank 0) should save the model.
+            if node_rank == 0:
+                # Create the directory if it doesn't exist.
+                os.makedirs(model_save_path, exist_ok=True)
+                
+                checkpoint_path = osp.join(model_save_path, f'model_epoch_{epoch}.pt')
+                print(f'[Node 0] Saving model checkpoint to: {checkpoint_path}')
+                
+                # When using DDP, the model is wrapped. We need to save `model.module.state_dict()`.
+                torch.save(model.module.state_dict(), checkpoint_path)
+
     print(f'--- [Node {current_ctx.rank}] Closing ---')
     torch.distributed.destroy_process_group()
 
@@ -419,6 +442,12 @@ if __name__ == '__main__':
         help='The port used for RPC communication across test samplers',
     )
     parser.add_argument('--logging', action='store_true')
+    parser.add_argument(
+        '--model_save_path',
+        type=str,
+        default='./saved_models',  # Default path inside the container
+        help='Directory to save the trained model checkpoints',
+    )
     parser.add_argument('--progress_bar', action='store_true')
     
     args = parser.parse_args()
@@ -462,6 +491,7 @@ if __name__ == '__main__':
         num_loader_threads=args.num_loader_threads,
         progress_bar=args.progress_bar,
         logfile=logfile,
+        model_save_path=args.model_save_path,
     )
     print('--- Finished training process ---')
     # ========================================================================

@@ -17,7 +17,8 @@ RUN apt-get update && \
     wget \
     tar \
     ca-certificates \
-    # FUSE is no longer needed
+    iproute2 \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # 3. Install Java 8 Manually

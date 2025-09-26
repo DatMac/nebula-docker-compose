@@ -82,13 +82,7 @@ services:
         condition: service_completed_successfully
     networks:
       - pyg-net
-    command: >
-      python /app/distributed_training.py
-        --num_epochs=10
-        --batch_size=512
-        --num_workers=0
-        --progress_bar
-        --model_save_path /app/saved_models
+    command: tail -f /dev/null
 
   pyg-worker:
     image: pyg-node
@@ -109,13 +103,7 @@ services:
         condition: service_started
     networks:
       - pyg-net
-    command: >
-      python /app/distributed_training.py
-        --num_epochs=10
-        --batch_size=512
-        --num_workers=0
-        --progress_bar
-        --model_save_path /app/saved_models
+    command: tail -f /dev/null
 
 volumes:
   hdfs-data:
