@@ -11,8 +11,8 @@ from pyspark.sql.types import (
 )
 
 # --- Configuration ---
-NUM_CUSTOMERS = 10_000_000
-TARGET_STRUCTURAL_PAIR_RATIO = 8.0
+NUM_CUSTOMERS = 1_000_000
+TARGET_STRUCTURAL_PAIR_RATIO = 80.0
 HDFS_BASE_PATH = "hdfs://namenode:8020/telecom"
 CHECKPOINT_DIR = "hdfs://namenode:8020/tmp/spark_checkpoints"
 
@@ -55,7 +55,7 @@ def generate_customers_df(spark, num_customers):
     return spark.createDataFrame(customer_rdd, customer_schema)
 
 
-def generate_structural_core_edges(spark, nodes_df, num_hubs=1_000_000, edges_per_node=3):
+def generate_structural_core_edges(spark, nodes_df, num_hubs=1_000_000, edges_per_node=10):
     print(f"  -> Generating a structural core with {num_hubs} hubs.")
     nodes_df.cache()
     hub_nodes = nodes_df.sample(False, num_hubs / nodes_df.count()).limit(num_hubs).collect()

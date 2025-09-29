@@ -5,21 +5,23 @@ FROM apache/airflow:2.6.0-python3.7
 ENV JAVA_HOME="/opt/java/openjdk-8"
 ENV HADOOP_HOME="/opt/hadoop-2.7.4"
 ENV HADOOP_CONF_DIR="${HADOOP_HOME}/etc/hadoop"
-ENV SPARK_HOME="/opt/spark-2.4.4" 
+ENV SPARK_HOME="/opt/spark-2.4.4"
 # Add all necessary bin directories to the PATH
 ENV PATH="${JAVA_HOME}/bin:${HADOOP_HOME}/bin:${HADOOP_HOME}/sbin:${SPARK_HOME}/bin:${PATH}"
 
 # --- Arguments for Download URLs ---
+# We still need the JDK URL, but Hadoop and Spark will be copied from local files.
 ARG JDK_VERSION="8u422-b05"
 ARG JDK_URL="https://github.com/adoptium/temurin8-binaries/releases/download/jdk${JDK_VERSION}/OpenJDK8U-jdk_x64_linux_hotspot_8u422b05.tar.gz"
-ARG HADOOP_VERSION="2.7.4"
-ARG HADOOP_URL="https://archive.apache.org/dist/hadoop/common/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz"
-ARG SPARK_VERSION="2.4.4"
-ARG SPARK_HADOOP_VERSION="2.7" 
-ARG SPARK_URL="https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop${SPARK_HADOOP_VERSION}.tgz"
 
 # Switch to root to perform all installations
 USER root
+
+# --- Copy Local Archives ---
+# Copy your pre-downloaded Hadoop and Spark archives into a temporary location in the image.
+# Make sure these files are in the same directory as your Dockerfile when you run the build.
+COPY hadoop-2.7.4.tar.gz /tmp/hadoop.tar.gz
+COPY spark-2.4.4-bin-hadoop2.7.tgz /tmp/spark.tgz
 
 # --- Installation Block ---
 RUN set -eux; \
@@ -33,15 +35,13 @@ RUN set -eux; \
     tar -xzf /tmp/openjdk.tar.gz -C "${JAVA_HOME}" --strip-components=1; \
     rm /tmp/openjdk.tar.gz; \
     \
-    # 3. Install Hadoop 2.7.4 Client
+    # 3. Install Hadoop 2.7.4 Client from the copied archive
     mkdir -p "${HADOOP_HOME}"; \
-    curl --fail --location --output /tmp/hadoop.tar.gz "${HADOOP_URL}"; \
     tar -xzf /tmp/hadoop.tar.gz -C "${HADOOP_HOME}" --strip-components=1; \
     rm /tmp/hadoop.tar.gz; \
     \
-    # 4. Install Spark 2.4.4 Client 
+    # 4. Install Spark 2.4.4 Client from the copied archive
     mkdir -p "${SPARK_HOME}"; \
-    curl --fail --location --output /tmp/spark.tgz "${SPARK_URL}"; \
     tar -xzf /tmp/spark.tgz -C "${SPARK_HOME}" --strip-components=1; \
     rm /tmp/spark.tgz; \
     \
@@ -52,6 +52,7 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 # --- Hadoop Cluster Configuration ---
+# This part remains the same, assuming you have a 'hadoop_conf' directory to copy.
 COPY ./hadoop_conf/ ${HADOOP_CONF_DIR}/
 
 # Switch back to the non-privileged airflow user

@@ -40,41 +40,8 @@ if [ "$ASSIGNED_RANK" -eq -1 ]; then
   echo "ERROR: Could not acquire a worker rank. All ranks may be taken."
   exit 1
 fi
+export WORKER_RANK=$ASSIGNED_RANK
 
-export WORKER_RANK=${ASSIGNED_RANK}
-export RANK=${ASSIGNED_RANK}
-export WORLD_SIZE=${NUM_WORKERS}
-
-# ==================== NEW SOLUTION FROM DOCS ==================================
-echo "[Rank ${RANK}] Discovering network interface for MASTER_ADDR=${MASTER_ADDR}"
-
-# The MASTER_ADDR is the hostname of the rank 0 container. We need its IP address.
-# `getent hosts` is a robust way to perform DNS lookup inside the container.
-MASTER_IP=$(getent hosts "$MASTER_ADDR" | awk '{ print $1 }')
-
-if [ -z "$MASTER_IP" ]; then
-    echo "ERROR: Could not resolve MASTER_ADDR '$MASTER_ADDR'. Exiting."
-    exit 1
-fi
-echo "[Rank ${RANK}] Resolved MASTER_ADDR to ${MASTER_IP}"
-
-if [ "$RANK" -eq 0 ]; then
-  # This is the master node. It needs to find the interface that has its own IP.
-  INTERFACE=$(ip -o -4 addr show | awk -v ip="$MASTER_IP" '$4 ~ ip {print $2}')
-else
-  # These are worker nodes. They need to find the interface used to route to the master.
-  INTERFACE=$(ip route get "$MASTER_IP" | grep -oP '(?<=dev )[^ ]+')
-fi
-
-if [ -z "$INTERFACE" ]; then
-    echo "ERROR: Could not discover a network interface. Exiting."
-    exit 1
-fi
-
-echo "[Rank ${RANK}] Discovered network interface: ${INTERFACE}. Exporting..."
-export GLOO_SOCKET_IFNAME=$INTERFACE
-export TP_SOCKET_IFNAME=$INTERFACE
-# ==============================================================================
 
 # 4. Dynamically construct data paths based on the assigned rank
 HDFS_PARTITION_PATH="${HDFS_DATA_PATH}/part_${WORKER_RANK}"
@@ -90,10 +57,10 @@ if [ -n "$HDFS_DATA_PATH" ]; then
   hdfs dfs -get "${HDFS_DATA_PATH}/edge_map.pt" "${LOCAL_DATA_PATH}/"
   hdfs dfs -get "${HDFS_DATA_PATH}/labels.pt" "${LOCAL_DATA_PATH}/"
 
-  #mkdir -p "${LOCAL_DATA_PATH}/part_1/"
-  #mkdir -p "${LOCAL_DATA_PATH}/part_2/"
-  #hdfs dfs -get "${HDFS_DATA_PATH}/part_1/*" "${LOCAL_DATA_PATH}/part_1"
-  #hdfs dfs -get "${HDFS_DATA_PATH}/part_2/*" "${LOCAL_DATA_PATH}/part_2"
+  mkdir -p "${LOCAL_DATA_PATH}/part_1/"
+  mkdir -p "${LOCAL_DATA_PATH}/part_2/"
+  hdfs dfs -get "${HDFS_DATA_PATH}/part_1/*" "${LOCAL_DATA_PATH}/part_1"
+  hdfs dfs -get "${HDFS_DATA_PATH}/part_2/*" "${LOCAL_DATA_PATH}/part_2"
 
   echo "Copying data for rank ${WORKER_RANK} from '${HDFS_PARTITION_PATH}' to '${LOCAL_PARTITION_PATH}'..."
   if hdfs dfs -test -e "$HDFS_PARTITION_PATH"; then
@@ -107,31 +74,7 @@ else
   echo "HDFS_DATA_PATH not set, skipping data copy."
 fi
 
-# ==================== NEW: DISTRIBUTED BARRIER ================================
-# All nodes must wait here until everyone has finished data copying.
-
-BARRIER_PATH="${COORD_PATH}/barrier"
-hdfs dfs -mkdir -p "$BARRIER_PATH"
-
-echo "[Rank ${RANK}] Finished setup. Signaling readiness and entering barrier..."
-# Create a zero-byte file to signal this rank is ready.
-hdfs dfs -touchz "${BARRIER_PATH}/rank_${RANK}_ready"
-
-while true; do
-  # List files in the barrier directory and count them.
-  # The `|| true` prevents the script from exiting if the directory is empty on the first try.
-  READY_COUNT=$(hdfs dfs -ls "$BARRIER_PATH" | wc -l || true)
-  
-  echo "[Rank ${RANK}] Waiting at barrier... ${READY_COUNT} of ${NUM_WORKERS} workers are ready."
-  
-  if [ "$READY_COUNT" -ge "$NUM_WORKERS" ]; then
-    echo "[Rank ${RANK}] All workers are ready. Proceeding..."
-    break # Exit the loop
-  fi
-  
-  sleep 5 # Wait before checking again
-done
-# ==============================================================================
+export WORKER_RANK
 
 # 6. Execute the main command passed to the container
 echo "Executing main command: $@"

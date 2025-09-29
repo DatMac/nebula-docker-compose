@@ -1,3 +1,5 @@
+# /app/dist_train.py
+
 import argparse
 import json
 import os
@@ -170,7 +172,6 @@ def train(
 
 
 def run_proc(
-    local_proc_rank: int,
     node_rank: int,
     num_nodes: int,
     dataset_root_dir: str,
@@ -281,12 +282,6 @@ def run_proc(
         async_sampling=async_sampling,
     )
 
-    if node_rank == 0:
-        print("All loaders initialized. Synchronizing all nodes before training...")
-    torch.distributed.barrier()
-    if node_rank == 0:
-        print("Synchronization complete. Starting training.")
-
     # ================== MODIFIED PART 2: Model Configuration ==================
     print('--- Initialize model ...')
     
@@ -366,6 +361,7 @@ def run_proc(
     print(f'--- [Node {current_ctx.rank}] Closing ---')
     torch.distributed.destroy_process_group()
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Arguments for distributed training')
@@ -440,21 +436,21 @@ if __name__ == '__main__':
         help='The port used for RPC communication across test samplers',
     )
     parser.add_argument('--logging', action='store_true')
+    parser.add_argument('--progress_bar', action='store_true')
     parser.add_argument(
         '--model_save_path',
         type=str,
         default='./saved_models',  # Default path inside the container
         help='Directory to save the trained model checkpoints',
     )
-    parser.add_argument('--progress_bar', action='store_true')
-
+    
     args = parser.parse_args()
 
     # Get distributed configuration from environment variables
     master_addr = os.environ.get('MASTER_ADDR', 'localhost')
     node_rank = int(os.environ.get('RANK', '0'))
     num_nodes = int(os.environ.get('WORLD_SIZE', '1'))
-
+    
     print('--- Distributed training on custom dataset ---')
     print(f'* total nodes: {num_nodes}')
     print(f'* node rank: {node_rank}')
@@ -471,30 +467,25 @@ if __name__ == '__main__':
         logfile = None
 
     print('--- Launching training process ...')
-    
-    torch.multiprocessing.spawn(
-        run_proc,
-        args=(
-            node_rank,
-            num_nodes,
-            args.dataset_root_dir,
-            master_addr,
-            args.ddp_port,
-            args.train_loader_port,
-            args.test_loader_port,
-            args.num_epochs,
-            args.batch_size,
-            args.num_neighbors,
-            args.async_sampling,
-            args.concurrency,
-            args.num_workers,
-            args.num_loader_threads,
-            args.progress_bar,
-            logfile,
-            args.model_save_path
-        ),
-        join=True,
+    # No torch.multiprocessing.spawn, just call the function directly
+    run_proc(
+        node_rank=node_rank,
+        num_nodes=num_nodes,
+        dataset_root_dir=args.dataset_root_dir,
+        master_addr=master_addr,
+        ddp_port=args.ddp_port,
+        train_loader_port=args.train_loader_port,
+        test_loader_port=args.test_loader_port,
+        num_epochs=args.num_epochs,
+        batch_size=args.batch_size,
+        num_neighbors=args.num_neighbors,
+        async_sampling=args.async_sampling,
+        concurrency=args.concurrency,
+        num_workers=args.num_workers,
+        num_loader_threads=args.num_loader_threads,
+        progress_bar=args.progress_bar,
+        logfile=logfile,
+        model_save_path=args.model_save_path,
     )
-
     print('--- Finished training process ---')
     # ========================================================================
