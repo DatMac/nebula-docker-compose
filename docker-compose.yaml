@@ -49,7 +49,7 @@ services:
     image: docker.io/vesoft/nebula-metad:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --local_ip=metad0
@@ -76,8 +76,8 @@ services:
       - 19559
       - 19560
     volumes:
-      - ./data/meta0:/data/meta
-      - ./logs/meta0:/logs
+      - /nebula_hdfs/data/meta0:/data/meta
+      - /nebula_hdfs/logs/meta0:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -88,7 +88,7 @@ services:
     image: docker.io/vesoft/nebula-metad:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --local_ip=metad1
@@ -115,8 +115,8 @@ services:
       - 19559
       - 19560
     volumes:
-      - ./data/meta1:/data/meta
-      - ./logs/meta1:/logs
+      - /nebula_hdfs/data/meta1:/data/meta
+      - /nebula_hdfs/logs/meta1:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -127,7 +127,7 @@ services:
     image: docker.io/vesoft/nebula-metad:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --local_ip=metad2
@@ -154,8 +154,8 @@ services:
       - 19559
       - 19560
     volumes:
-      - ./data/meta2:/data/meta
-      - ./logs/meta2:/logs
+      - /nebula_hdfs/data/meta2:/data/meta
+      - /nebula_hdfs/logs/meta2:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -166,7 +166,7 @@ services:
     image: docker.io/vesoft/nebula-storaged:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --local_ip=storaged0
@@ -185,7 +185,6 @@ services:
       - --disable_page_cache=false
       - --enable_rocksdb_prefix_filtering=true
       - --enable_rocksdb_whole_key_filtering=true
-      # - --rocksdb_filtering_prefix_length=12
       - --enable_partitioned_index_filter=false
       - --query_concurrently=true
       - --num_io_threads=16
@@ -193,7 +192,6 @@ services:
       - --num_worker_threads=32
       - --max_concurrent_subtasks=10
       - --memory_tracker_limit_ratio=0.8
-      # - --rocksdb_db_options={"max_total_wal_size":"0"}
     depends_on:
       - metad0
       - metad1
@@ -209,8 +207,8 @@ services:
       - 19779
       - 19780
     volumes:
-      - ./data/storage0:/data/storage
-      - ./logs/storage0:/logs
+      - /nebula_hdfs/data/storage0:/data/storage
+      - /nebula_hdfs/logs/storage0:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -221,7 +219,7 @@ services:
     image: docker.io/vesoft/nebula-storaged:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --local_ip=storaged1
@@ -240,7 +238,6 @@ services:
       - --disable_page_cache=false
       - --enable_rocksdb_prefix_filtering=true
       - --enable_rocksdb_whole_key_filtering=true
-      # - --rocksdb_filtering_prefix_length=12
       - --enable_partitioned_index_filter=false
       - --query_concurrently=true
       - --num_io_threads=16
@@ -248,7 +245,6 @@ services:
       - --num_worker_threads=32
       - --max_concurrent_subtasks=10
       - --memory_tracker_limit_ratio=0.8
-      # - --rocksdb_db_options={"max_total_wal_size":"0"}
     depends_on:
       - metad0
       - metad1
@@ -264,8 +260,8 @@ services:
       - 19779
       - 19780
     volumes:
-      - ./data/storage1:/data/storage
-      - ./logs/storage1:/logs
+      - /nebula_hdfs/data/storage1:/data/storage
+      - /nebula_hdfs/logs/storage1:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -276,7 +272,7 @@ services:
     image: docker.io/vesoft/nebula-storaged:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --local_ip=storaged2
@@ -295,7 +291,6 @@ services:
       - --disable_page_cache=false
       - --enable_rocksdb_prefix_filtering=true
       - --enable_rocksdb_whole_key_filtering=true
-      # - --rocksdb_filtering_prefix_length=12
       - --enable_partitioned_index_filter=false
       - --query_concurrently=true
       - --num_io_threads=16
@@ -303,7 +298,6 @@ services:
       - --num_worker_threads=32
       - --max_concurrent_subtasks=10
       - --memory_tracker_limit_ratio=0.8
-      # - --rocksdb_db_options={"max_total_wal_size":"0"}
     depends_on:
       - metad0
       - metad1
@@ -319,19 +313,20 @@ services:
       - 19779
       - 19780
     volumes:
-      - ./data/storage2:/data/storage
-      - ./logs/storage2:/logs
+      - /nebula_hdfs/data/storage2:/data/storage
+      - /nebula_hdfs/logs/storage2:/logs
     networks:
       - nebula-net
     restart: on-failure
     cap_add:
       - SYS_PTRACE
 
+
   graphd:
     image: docker.io/vesoft/nebula-graphd:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --port=9669
@@ -379,7 +374,7 @@ services:
       - 19669
       - 19670
     volumes:
-      - ./logs/graph:/logs
+      - /nebula_hdfs/logs/graph:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -390,7 +385,7 @@ services:
     image: docker.io/vesoft/nebula-graphd:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --port=9669
@@ -438,7 +433,7 @@ services:
       - 19669
       - 19670
     volumes:
-      - ./logs/graph1:/logs
+      - /nebula_hdfs/logs/graph1:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -449,7 +444,7 @@ services:
     image: docker.io/vesoft/nebula-graphd:v3.8.0
     environment:
       USER: root
-      TZ:   "${TZ}"
+      TZ: "${TZ}"
     command:
       - --meta_server_addrs=metad0:9559,metad1:9559,metad2:9559
       - --port=9669
@@ -497,17 +492,17 @@ services:
       - 19669
       - 19670
     volumes:
-      - ./logs/graph2:/logs
+      - /nebula_hdfs/logs/graph2:/logs
     networks:
       - nebula-net
     restart: on-failure
     cap_add:
       - SYS_PTRACE
-  
+
   console:
     image: docker.io/vesoft/nebula-console:v3.6.0
     entrypoint: ""
-    command: 
+    command:
       - sh
       - -c
       - |
@@ -534,7 +529,7 @@ services:
       - "9000:9000"
       - "8020:8020"
     volumes:
-      - ./data/hdfs/namenode:/hadoop/dfs/name
+      - /nebula_hdfs/data/hdfs/namenode:/hadoop/dfs/name
     environment:
       - CLUSTER_NAME=test
     networks:
@@ -551,7 +546,7 @@ services:
     hostname: datanode
     restart: always
     volumes:
-      - ./data/hdfs/datanode:/hadoop/dfs/data
+      - /nebula_hdfs/data/hdfs/datanode:/hadoop/dfs/data
     environment:
       SERVICE_PRECONDITION: "namenode:50070"
       CORE_CONF_fs_defaultFS: "hdfs://namenode:8020"
@@ -562,12 +557,13 @@ services:
       - nebula-net
 
   spark-master:
-    image: my-spark-app-image 
+    image: my-spark-app-image
     user: "1001:1001"
     environment:
       - SPARK_MODE=master
-      - SPARK_OPTS=--conf spark.driver.memory=4g --conf spark.driver.cores=2 --conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
+      - SPARK_OPTS=--conf spark.driver.memory=14g --conf spark.driver.cores=4 --conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
       - PYSPARK_PYTHON=/usr/local/bin/python3
+    mem_limit: 16g
     ports:
       - "8080:8080"
       - "7077:7077"
@@ -575,6 +571,7 @@ services:
       - ./spark/apps:/opt/bitnami/spark/apps
       - ./spark/data:/opt/bitnami/spark/data
       - ./spark/config/spark-defaults.conf:/opt/bitnami/spark/conf/spark-defaults.conf
+      - /spark-tmp:/opt/bitnami/spark/tmp-dir
     depends_on:
       - namenode
       - datanode
@@ -582,14 +579,14 @@ services:
       - nebula-net
 
   spark-worker:
-    image: my-spark-app-image 
+    image: my-spark-app-image
     user: "1001:1001"
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
       - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
-      - SPARK_WORKER_MEMORY=6g
-      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=14g
+      - SPARK_WORKER_CORES=4
       - PYSPARK_PYTHON=/usr/local/bin/python3
     depends_on:
       - spark-master
@@ -597,6 +594,7 @@ services:
       - ./spark/apps:/opt/bitnami/spark/apps
       - ./spark/data:/opt/bitnami/spark/data
       - ./spark/config/spark-defaults.conf:/opt/bitnami/spark/conf/spark-defaults.conf
+      - /spark-tmp:/opt/bitnami/spark/tmp-dir
     networks:
       - nebula-net
 
@@ -682,7 +680,7 @@ services:
     depends_on:
       airflow-init:
         condition: service_completed_successfully
-
+        
 networks:
   nebula-net:
     driver: bridge

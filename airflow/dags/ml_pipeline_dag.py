@@ -79,24 +79,31 @@ SPARK_PACKAGES_GCN = [
 
 torch_and_hdfs_command = """
 bash -c "
-torchrun \
---nproc_per_node=3 \
---nnodes=1 \
---rdzv_backend=c10d \
---rdzv_endpoint=localhost:29500 \
-/app/distributed_training.py \
---dataset_root_dir /pyg_dataset \
---num_epochs 10 \
---batch_size 512 \
---num_neighbors '10,5' \
---progress_bar \
---num_workers=0 \
---model_save_path /app/my_models \
-&& \
-echo '--- Training finished, uploading models to HDFS ---' && \
-hdfs dfs -mkdir -p /models/{{ ts_nodash }} && \
-hdfs dfs -put /app/my_models/* /models/{{ ts_nodash }} && \
-echo '--- Upload complete ---'
+# --- Part 1: Training ---
+torchrun \\
+--nproc_per_node=3 \\
+--nnodes=1 \\
+--rdzv_backend=c10d \\
+--rdzv_endpoint=localhost:29500 \\
+/app/distributed_training.py \\
+--dataset_root_dir /pyg_dataset \\
+--num_epochs 10 \\
+--batch_size 512 \\
+--num_neighbors '10,5' \\
+--progress_bar \\
+--num_workers=0 \\
+--model_save_path /app/my_models \\
+&& \\
+echo '--- Training finished, uploading model checkpoint to HDFS ---' && \\
+hdfs dfs -mkdir -p /models/{{ ts_nodash }} && \\
+hdfs dfs -put /app/my_models/* /models/{{ ts_nodash }} && \\
+echo '--- Upload complete ---' && \\
+echo '--- Exporting latest model for Triton Inference Server ---' && \\
+python3 /app/export_for_triton.py \\
+--model_name graphsage_model \\
+--checkpoint_path /app/my_models/model_epoch_10.pt \\
+--dataset_meta_path /pyg_dataset/META.json \\
+--hdfs_repo_path /triton_models
 "
 """
 
@@ -252,3 +259,4 @@ with DAG(
     [nebula_importer_task, submit_nebula_exchange_job] >> submit_incremental_spark_job
     submit_incremental_spark_job >> submit_gnn_prep_job
     submit_gnn_prep_job >> run_pytorch_training
+

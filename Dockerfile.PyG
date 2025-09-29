@@ -17,7 +17,7 @@ RUN apt-get update && \
     wget \
     tar \
     ca-certificates \
-    # FUSE is no longer needed
+    rsync \
     && rm -rf /var/lib/apt/lists/*
 
 # 3. Install Java 8 Manually

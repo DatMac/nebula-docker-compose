@@ -680,11 +680,100 @@ services:
     depends_on:
       airflow-init:
         condition: service_completed_successfully
-        
+
+  triton-server:
+    image: nvcr.io/nvidia/tritonserver:24.01-py3
+    container_name: triton-server
+    hostname: triton-server
+    restart: always
+    ports:
+      - "8000:8000" # HTTP
+      - "8001:8001" # gRPC
+      - "8002:8002" # Metrics
+    volumes:
+      - triton-model-repo:/models
+    networks:
+      - nebula-net
+    command: tritonserver --model-repository=/models --model-control-mode=poll --repository-poll-secs=30 --log-verbose=1
+    depends_on:
+      namenode:
+        condition: service_healthy
+      datanode:
+        condition: service_healthy
+
+  model-repository-syncer:
+    image: pyg-node
+    container_name: model-repository-syncer
+    hostname: model-repository-syncer
+    restart: always
+    volumes:
+      - ./src:/app # Assuming sync script is in src
+      - triton-model-repo:/models
+      - ./hdfs-config/core-site.xml:/opt/hadoop-2.7.4/etc/hadoop/core-site.xml
+      - ./hdfs-config/hdfs-site.xml:/opt/hadoop-2.7.4/etc/hadoop/hdfs-site.xml
+    environment:
+      - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+      - HADOOP_CONF_DIR=/opt/hadoop-2.7.4/etc/hadoop
+      - HDFS_MODEL_REPO=/triton_models # The source directory on HDFS
+      - LOCAL_MODEL_REPO=/models        # The target directory in the shared volume
+    networks:
+      - nebula-net
+    entrypoint: /bin/bash
+    command: /app/sync_models.sh # Path to the sync script
+    depends_on:
+      namenode:
+        condition: service_healthy
+      datanode:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: prometheus
+    hostname: prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - nebula-net
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    depends_on:
+      - triton-server
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: grafana
+    hostname: grafana
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - grafana-data:/var/lib/grafana
+    networks:
+      - nebula-net
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin # Change in a real production environment
+    depends_on:
+      - prometheus
+
 networks:
   nebula-net:
     driver: bridge
 
 volumes:
   airflow_postgres_meta_data:
+    driver: local
+  triton-model-repo:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
     driver: local
