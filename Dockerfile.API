@@ -1,0 +1,25 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install necessary system dependencies if any are needed in the future
+# RUN apt-get update && apt-get install -y --no-install-recommends ...
+
+# Install Python dependencies
+# Using CPU version of PyTorch as it's only needed for tensor manipulation
+# Copy the application code into the container
+RUN pip install --no-cache-dir \
+    "fastapi[all]" \
+    "requests" \
+    "nebula3-python==3.8.0" \
+    "cassandra-driver" \
+    "numpy" \
+    "torch==2.4.0" --extra-index-url https://download.pytorch.org/whl/cpu
+
+COPY ./inference-api/main.py /app/main.py
+
+# Expose the port the API will run on inside the container
+EXPOSE 8000
+
+# Command to run the Uvicorn server
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

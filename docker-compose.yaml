@@ -76,8 +76,8 @@ services:
       - 19559
       - 19560
     volumes:
-      - /nebula_hdfs/data/meta0:/data/meta
-      - /nebula_hdfs/logs/meta0:/logs
+      - /spark-tmp/nebula_hdfs/data/meta0:/data/meta
+      - /spark-tmp/nebula_hdfs/logs/meta0:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -115,8 +115,8 @@ services:
       - 19559
       - 19560
     volumes:
-      - /nebula_hdfs/data/meta1:/data/meta
-      - /nebula_hdfs/logs/meta1:/logs
+      - /spark-tmp/nebula_hdfs/data/meta1:/data/meta
+      - /spark-tmp/nebula_hdfs/logs/meta1:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -154,8 +154,8 @@ services:
       - 19559
       - 19560
     volumes:
-      - /nebula_hdfs/data/meta2:/data/meta
-      - /nebula_hdfs/logs/meta2:/logs
+      - /spark-tmp/nebula_hdfs/data/meta2:/data/meta
+      - /spark-tmp/nebula_hdfs/logs/meta2:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -207,8 +207,8 @@ services:
       - 19779
       - 19780
     volumes:
-      - /nebula_hdfs/data/storage0:/data/storage
-      - /nebula_hdfs/logs/storage0:/logs
+      - /spark-tmp/nebula_hdfs/data/storage0:/data/storage
+      - /spark-tmp/nebula_hdfs/logs/storage0:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -260,8 +260,8 @@ services:
       - 19779
       - 19780
     volumes:
-      - /nebula_hdfs/data/storage1:/data/storage
-      - /nebula_hdfs/logs/storage1:/logs
+      - /spark-tmp/nebula_hdfs/data/storage1:/data/storage
+      - /spark-tmp/nebula_hdfs/logs/storage1:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -313,8 +313,8 @@ services:
       - 19779
       - 19780
     volumes:
-      - /nebula_hdfs/data/storage2:/data/storage
-      - /nebula_hdfs/logs/storage2:/logs
+      - /spark-tmp/nebula_hdfs/data/storage2:/data/storage
+      - /spark-tmp/nebula_hdfs/logs/storage2:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -374,7 +374,7 @@ services:
       - 19669
       - 19670
     volumes:
-      - /nebula_hdfs/logs/graph:/logs
+      - /spark-tmp/nebula_hdfs/logs/graph:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -433,7 +433,7 @@ services:
       - 19669
       - 19670
     volumes:
-      - /nebula_hdfs/logs/graph1:/logs
+      - /spark-tmp/nebula_hdfs/logs/graph1:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -492,7 +492,7 @@ services:
       - 19669
       - 19670
     volumes:
-      - /nebula_hdfs/logs/graph2:/logs
+      - /spark-tmp/nebula_hdfs/logs/graph2:/logs
     networks:
       - nebula-net
     restart: on-failure
@@ -529,7 +529,7 @@ services:
       - "9000:9000"
       - "8020:8020"
     volumes:
-      - /nebula_hdfs/data/hdfs/namenode:/hadoop/dfs/name
+      - /spark-tmp/nebula_hdfs/data/hdfs/namenode:/hadoop/dfs/name
     environment:
       - CLUSTER_NAME=test
     networks:
@@ -546,7 +546,7 @@ services:
     hostname: datanode
     restart: always
     volumes:
-      - /nebula_hdfs/data/hdfs/datanode:/hadoop/dfs/data
+      - /spark-tmp/nebula_hdfs/data/hdfs/datanode:/hadoop/dfs/data
     environment:
       SERVICE_PRECONDITION: "namenode:50070"
       CORE_CONF_fs_defaultFS: "hdfs://namenode:8020"
