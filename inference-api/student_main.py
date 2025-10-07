@@ -100,19 +100,15 @@ def prepare_tensors_from_db(start_cust_id: str):
         level2_vertex_ids = set()
         if level1_vertex_ids:
             l1_vids_str = ", ".join([f'"{vid}"' for vid in level1_vertex_ids])
-            # The GO query finds neighbors of L1 nodes, which are the L2 nodes
-            go_2_hop_query = f"GO 1 STEPS FROM {l1_vids_str} OVER * YIELD DISTINCT dst(edge)"
+            go_2_hop_query = f"GO 2 STEPS FROM {l1_vids_str} OVER * YIELD DISTINCT dst(edge)"
             result_2_hop = session.execute(go_2_hop_query)
             if not result_2_hop.is_succeeded():
                  raise HTTPException(status_code=500, detail=f"Nebula 2-hop traversal failed.")
-            # We must remove the start node and L1 nodes in case of cycles
-            l2_candidates = {get_primitive_value(row.values[0]) for row in result_2_hop.rows()}
-            level2_vertex_ids = l2_candidates - level1_vertex_ids - {start_vertex_id}
+            level2_vertex_ids = {get_primitive_value(row.values[0]) for row in result_2_hop.rows()}
 
         subgraph_vertex_ids = {start_vertex_id}.union(level1_vertex_ids).union(level2_vertex_ids)
         sorted_vertex_ids = sorted(list(subgraph_vertex_ids))
 
-        # --- Feature fetching logic remains the same ---
         fetch_vids_str = ", ".join([f'"{vid}"' for vid in sorted_vertex_ids])
         fetch_query = f"FETCH PROP ON {NEBULA_VERTEX_TAG} {fetch_vids_str} YIELD id(vertex), properties(vertex).{NEBULA_LOOKUP_PROPERTY}"
         result = session.execute(fetch_query)
@@ -122,13 +118,13 @@ def prepare_tensors_from_db(start_cust_id: str):
             get_primitive_value(row.values[0]): get_primitive_value(row.values[1]) for row in result.rows()
         }
         subgraph_cust_ids = list(vertex_id_to_cust_id_map.values())
-
+        
         if not subgraph_cust_ids:
             raise HTTPException(status_code=404, detail="Subgraph is empty or lacks feature keys.")
-
+        
         rows = cassandra_session.execute(cassandra_prepared_statement, (subgraph_cust_ids,))
         cust_id_to_feature_map = {row.cust_id: row.features for row in rows}
-
+        
         if len(cust_id_to_feature_map) != len(subgraph_cust_ids):
             missing = set(subgraph_cust_ids) - set(cust_id_to_feature_map.keys())
             raise HTTPException(status_code=404, detail=f"Feature data missing for CUST IDs: {missing}")
@@ -137,49 +133,21 @@ def prepare_tensors_from_db(start_cust_id: str):
         feature_list = [cust_id_to_feature_map[vertex_id_to_cust_id_map[vid]] for vid in sorted_vertex_ids]
         node_features = torch.tensor(feature_list, dtype=torch.float32)
 
-        # --- OPTIMIZATION START: Replace the single inefficient edge query ---
-
-        # Use a set to store edge tuples to automatically handle any duplicates
-        edge_set = set()
-
-        # Query 1: Get edges between the start node (L0) and its 1-hop neighbors (L1)
-        if level1_vertex_ids:
-            l1_vids_str = ", ".join([f'"{vid}"' for vid in level1_vertex_ids])
-            edge_query_1 = (f"MATCH (v1)-[e]-(v2) WHERE id(v1) == '{start_vertex_id}' AND id(v2) IN [{l1_vids_str}] "
-                            f"RETURN id(v1), id(v2)")
-            result_edges_1 = session.execute(edge_query_1)
-            if not result_edges_1.is_succeeded():
-                raise HTTPException(status_code=500, detail="Nebula edge match failed for L0->L1.")
-            for row in result_edges_1.rows():
-                edge_set.add((get_primitive_value(row.values[0]), get_primitive_value(row.values[1])))
-
-        # Query 2: Get edges between 1-hop neighbors (L1) and 2-hop neighbors (L2)
-        if level1_vertex_ids and level2_vertex_ids:
-            l1_vids_str = ", ".join([f'"{vid}"' for vid in level1_vertex_ids])
-            l2_vids_str = ", ".join([f'"{vid}"' for vid in level2_vertex_ids])
-            edge_query_2 = (f"MATCH (v1)-[e]-(v2) WHERE id(v1) IN [{l1_vids_str}] AND id(v2) IN [{l2_vids_str}] "
-                            f"RETURN id(v1), id(v2)")
-            result_edges_2 = session.execute(edge_query_2)
-            if not result_edges_2.is_succeeded():
-                raise HTTPException(status_code=500, detail="Nebula edge match failed for L1->L2.")
-            for row in result_edges_2.rows():
-                edge_set.add((get_primitive_value(row.values[0]), get_primitive_value(row.values[1])))
-
-        # Convert the final set of required edges into the source and destination tensors
+        edge_query = f"MATCH (v1)-[e]->(v2) WHERE id(v1) IN [{fetch_vids_str}] AND id(v2) IN [{fetch_vids_str}] RETURN id(v1), id(v2)"
+        result = session.execute(edge_query)
+        if not result.is_succeeded():
+            raise HTTPException(status_code=500, detail=f"Nebula edge match failed.")
         source_nodes, dest_nodes = [], []
-        for src_vid, dst_vid in edge_set:
-            # Ensure both source and destination are part of the subgraph before adding
-            if src_vid in vertex_id_to_idx_map and dst_vid in vertex_id_to_idx_map:
-                source_nodes.append(vertex_id_to_idx_map[src_vid])
-                dest_nodes.append(vertex_id_to_idx_map[dst_vid])
-
+        for row in result.rows():
+            src_vid = get_primitive_value(row.values[0])
+            dst_vid = get_primitive_value(row.values[1])
+            source_nodes.append(vertex_id_to_idx_map[src_vid])
+            dest_nodes.append(vertex_id_to_idx_map[dst_vid])
         edge_index = torch.tensor([source_nodes, dest_nodes], dtype=torch.int64)
-
-        # --- OPTIMIZATION END ---
 
         # Find the index of our original start node in the final sorted list
         start_node_index = vertex_id_to_idx_map[start_vertex_id]
-
+        
         return node_features, edge_index, start_node_index
 
 # --- MODIFICATION 2: Update the /predict endpoint to handle the new return value ---
