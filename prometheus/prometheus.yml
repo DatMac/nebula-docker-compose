@@ -13,3 +13,8 @@ scrape_configs:
   - job_name: 'cassandra'
     static_configs:
       - targets: ['cassandra:7070']
+
+  - job_name: 'inference-api'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['inference-api:8000']

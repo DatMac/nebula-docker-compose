@@ -10,6 +10,7 @@ WORKDIR /app
 # Copy the application code into the container
 RUN pip install --no-cache-dir \
     "fastapi[all]" \
+    "prometheus-fastapi-instrumentator" \
     "requests" \
     "nebula3-python==3.8.0" \
     "cassandra-driver" \

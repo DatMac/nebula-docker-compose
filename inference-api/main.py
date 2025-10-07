@@ -9,6 +9,7 @@ from cassandra.cluster import Cluster
 from nebula3.gclient.net import ConnectionPool
 from nebula3.Config import Config
 from nebula3.common.ttypes import Value
+from prometheus_fastapi_instrumentator import Instrumentator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,6 +28,14 @@ TRITON_URL = os.environ.get("TRITON_URL", "http://triton-server:8000/v2/models/g
 NUM_HOPS = 2
 
 app = FastAPI(title="Graph Inference Service")
+
+try:
+    print("--- ATTEMPTING TO INSTRUMENT APP ---")
+    Instrumentator().instrument(app).expose(app)
+    print("--- SUCCESSFULLY INSTRUMENTED APP AND EXPOSED /metrics ---")
+except Exception as e:
+    print(f"--- FAILED TO INSTRUMENT APP: {e} ---")
+
 nebula_connection_pool = None
 cassandra_session = None
 cassandra_prepared_statement = None
