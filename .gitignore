@@ -4,6 +4,7 @@ data/
 logs/
 spark/data/
 spark/apps/*.jar
+cassandra-monitoring/*.jar
 *.jar
 *.gz
 *.tgz

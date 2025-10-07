@@ -35,8 +35,14 @@ services:
     hostname: cassandra
     ports:
       - "9042:9042"
+      - "7070:7070" # Expose the JMX exporter port
     volumes:
       - ../cassandra-data/cassandra:/var/lib/cassandra
+      # Mount the JMX exporter files
+      - ./cassandra-monitoring:/opt/cassandra/jmx_exporter
+    environment:
+      # Add JVM_OPTS to load the java agent
+      - JVM_OPTS=-javaagent:/opt/cassandra/jmx_exporter/jmx_prometheus_javaagent.jar=7070:/opt/cassandra/jmx_exporter/cassandra-jmx-config.yml
     networks:
       - nebula-net
     healthcheck:
