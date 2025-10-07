@@ -764,6 +764,31 @@ services:
     depends_on:
       - prometheus
 
+  nebula-stats-exporter:
+    image: vesoft/nebula-stats-exporter:v3.3.0
+    container_name: nebula-stats-exporter
+    hostname: nebula-stats-exporter
+    restart: always
+    ports:
+      - "9100:9100"
+    volumes:
+      - ./nebula-export/config.yaml:/config.yaml
+    networks:
+      - nebula-net
+    command:
+      - '--bare-metal'
+      - '--bare-metal-config=/config.yaml'
+    depends_on:
+      - metad0
+      - metad1
+      - metad2
+      - storaged0
+      - storaged1
+      - storaged2
+      - graphd
+      - graphd1
+      - graphd2
+
   inference-api:
     image: inference-api
     container_name: inference-api
