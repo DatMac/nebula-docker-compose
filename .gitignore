@@ -8,3 +8,4 @@ cassandra-monitoring/*.jar
 *.jar
 *.gz
 *.tgz
+spark/apps/serviceAccountKey.json

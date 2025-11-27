@@ -1,4 +1,4 @@
-FROM bitnami/spark:2.4.4-debian-10-r13
+FROM bitnamilegacy/spark:2.4.4-r13
 
 # Start as root to install packages
 USER root
@@ -30,15 +30,22 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # === LAYER 2: Install Python build tools and application packages ===
-# First, upgrade pip and install the core build tools: setuptools, wheel, cmake.
-# Then, install the problematic pypandoc dependency.
-# Finally, install the rest of the packages using --no-build-isolation.
+# 1. Upgrade pip FIRST in a separate layer to ensure the new version is used
 RUN python3.7 -m pip install --upgrade pip && \
-    python3.7 -m pip install "setuptools>=40.8.0" wheel && \
-    python3.7 -m pip install "cmake>=3.20" "pypandoc==1.4" && \
-    python3.7 -m pip install \
+    python3.7 -m pip install "setuptools>=40.8.0" wheel "cmake>=3.20"
+
+# 2. Install PySpark ALONE (The heavy file) with high timeout
+# We use --default-timeout=1000 and a different mirror if needed
+RUN python3.7 -m pip install --default-timeout=1000 --no-cache-dir "pyspark==2.4.8"
+
+ENV CASS_DRIVER_NO_CYTHON=1
+
+# 3. Install the rest of the dependencies
+RUN python3.7 -m pip install \
+    --default-timeout=1000 \
     --no-build-isolation \
-    "pyspark==2.4.8" \
+    "firebase-admin" \
+    "pypandoc==1.4" \
     dataclasses \
     "Faker==14.2.1" \
     "typing-extensions==4.1.1" \
