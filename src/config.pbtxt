@@ -1,0 +1,42 @@
+name: "recsys_model"
+platform: "pytorch_libtorch"
+max_batch_size: 0
+
+input [
+  {
+    name: "x_user"
+    data_type: TYPE_FP32
+    dims: [ -1, -1 ]
+  },
+  {
+    name: "x_quiz"
+    data_type: TYPE_FP32
+    dims: [ -1, -1 ]
+  },
+  {
+    name: "edge_index"
+    data_type: TYPE_INT64
+    dims: [ 2, -1 ]
+  },
+  {
+    name: "edge_label_index"
+    data_type: TYPE_INT64
+    dims: [ 2, -1 ]
+  }
+]
+
+output [
+  {
+    name: "scores"
+    data_type: TYPE_FP32
+    dims: [ -1 ]
+  }
+]
+
+# --- CHANGED HERE ---
+instance_group [
+  {
+    count: 1
+    kind: KIND_CPU  # Changed from KIND_GPU
+  }
+]
