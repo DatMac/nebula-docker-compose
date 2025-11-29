@@ -591,8 +591,8 @@ services:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
       - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://namenode:8020
-      - SPARK_WORKER_MEMORY=2g
-      - SPARK_WORKER_CORES=1
+      - SPARK_WORKER_MEMORY=4g
+      - SPARK_WORKER_CORES=2
       - PYSPARK_PYTHON=/usr/local/bin/python3
     depends_on:
       - spark-master

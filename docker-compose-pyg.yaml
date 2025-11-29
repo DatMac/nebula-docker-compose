@@ -71,9 +71,9 @@ services:
       - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
       - HADOOP_CONF_DIR=/opt/hadoop-2.7.4/etc/hadoop
       - CLASSPATH=$(/opt/hadoop-2.7.4/bin/hadoop classpath --glob)
-      - HDFS_DATA_PATH=/tmp/pyg_dataset
-      - LOCAL_DATA_PATH=/pyg_dataset
-      - NUM_WORKERS=3
+      - HDFS_DATA_PATH=/tmp/pyg_recsys_hetero
+      - LOCAL_DATA_PATH=/pyg_recsys_hetero
+      - NUM_WORKERS=1
       - HDFS_COORD_PATH=/job-coordination
     depends_on:
       namenode:
